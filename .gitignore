@@ -1,0 +1,45 @@
+# PlatformIO
+.pio/
+.piolibdeps/
+.pioenvs/
+.pio/
+firmware/
+*.elf
+*.map
+*.bin
+*.hex
+*.uf2
+
+# Build / generated files
+build/
+dist/
+*.o
+*.obj
+*.a
+*.lib
+
+# IDE / editor
+.vscode/
+.idea/
+*.code-workspace
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.venv/
+venv/
+env/
+
+# Local configuration / secrets
+.env
+.env.*
+*.secret
+secrets/
+credentials/
+config.local.*
