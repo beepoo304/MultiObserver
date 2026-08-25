@@ -154,8 +154,33 @@ bool MO::enqueueTx(const uint8_t* raw, size_t rawLength,
 }
 
 void MO::setObserverIdentity(std::string origin, std::string originId) {
+  observerOrigin_.clear();
+  observerId_.clear();
+
+  if (origin.empty() || originId.size() != 64) {
+    return;
+  }
+
+  for (char c : originId) {
+    const bool isHex =
+        (c >= '0' && c <= '9') ||
+        (c >= 'a' && c <= 'f') ||
+        (c >= 'A' && c <= 'F');
+    if (!isHex) {
+      return;
+    }
+  }
+
   observerOrigin_ = std::move(origin);
   observerId_ = std::move(originId);
+
+  for (char& c : observerId_) {
+    if (c >= 'a' && c <= 'f') {
+      c = static_cast<char>(c - ('a' - 'A'));
+    }
+  }
+
+  mqtt_.setObserverIdentity(observerId_);
 }
 
 void MO::processRxEvent(const RxEvent& event) {

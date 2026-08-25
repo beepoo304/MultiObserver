@@ -66,6 +66,16 @@ bool MOBridge::onTx(mesh::Packet* packet, int len) noexcept {
       sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
 }
 
+void MOBridge::setObserverIdentity(const char* name,
+                                    const char* publicKeyHex) noexcept {
+  if (name == nullptr || publicKeyHex == nullptr) {
+    observer_.setObserverIdentity({}, {});
+    return;
+  }
+
+  observer_.setObserverIdentity(name, publicKeyHex);
+}
+
 bool MOBridge::handleCommand(uint32_t senderTimestamp, const char* command,
                              char* reply) noexcept {
   return observer_.handleCommand(senderTimestamp, command, reply);

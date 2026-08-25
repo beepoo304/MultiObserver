@@ -102,7 +102,7 @@ class MOMQTT {
   [[nodiscard]] BrokerStatus status(BrokerId broker) const noexcept;
   [[nodiscard]] bool connected(BrokerId broker) const noexcept;
 
-  bool publishPacket(const PacketData& packet);
+  void setObserverIdentity(std::string_view originId);\n\n  bool publishPacket(const PacketData& packet);
   bool publishRaw(const RawData& raw);
   bool publishStatus(const StatusData& status, bool retain = true);
 

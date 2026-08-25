@@ -135,6 +135,10 @@ bool MOMQTT::connected(BrokerId broker) const noexcept {
   return runtime(brokers_, broker).state == State::Connected;
 }
 
+void MOMQTT::setObserverIdentity(std::string_view originId) {
+  observerId_.assign(originId.data(), originId.size());
+}
+
 bool MOMQTT::publishPacket(const PacketData& packet) {
   char payload[kPacketJsonBufferSize];
   size_t length = 0;
@@ -405,14 +409,15 @@ bool MOMQTT::buildClientConfig(BrokerId broker,
 
 bool MOMQTT::buildTopic(std::string_view leaf, char* buffer,
                         size_t bufferSize) const {
-  const auto& first = prefs_.mqtt1();
-  std::string_view iata = first.iata;
-  if (iata.empty()) return false;
+  const std::string& iata = prefs_.iata();
+  if (iata.empty() || observerId_.empty() || leaf.empty()) {
+    return false;
+  }
 
   const int written = std::snprintf(
       buffer, bufferSize, "meshcore/%.*s/%.*s/%.*s",
       static_cast<int>(iata.size()), iata.data(),
-      static_cast<int>(first.deviceId.size()), first.deviceId.data(),
+      static_cast<int>(observerId_.size()), observerId_.data(),
       static_cast<int>(leaf.size()), leaf.data());
 
   return written >= 0 && static_cast<size_t>(written) < bufferSize;
