@@ -1,21 +1,69 @@
 #include "MOWifiPrefs.h"
 
-#include <Arduino.h>
-#include <LittleFS.h>
+#include <FS.h>
+#include <SPIFFS.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <utility>
 
 namespace {
+constexpr uint32_t kMagic = 0x4D4F5746;  // MOWF
+constexpr char kFilename[] = "/mo_wifi_prefs";
 
-constexpr char kMagic[] = "MOWIFI1";
+struct PersistedWifi {
+  uint32_t magic;
+  char ssid[65];
+  char password[129];
+};
 
-bool readLine(File& file, std::string& value) {
-  String line = file.readStringUntil('\n');
-  line.trim();
-  value = line.c_str();
-  return true;
+bool readPersisted(PersistedWifi& persisted) {
+  if (!SPIFFS.exists(kFilename)) {
+    return false;
+  }
+
+  File file = SPIFFS.open(kFilename, "r");
+  if (!file) {
+    return false;
+  }
+
+  const size_t size = std::min(static_cast<size_t>(file.size()),
+                               sizeof(persisted));
+  const bool ok = size >= sizeof(persisted.magic) &&
+                  file.read(reinterpret_cast<uint8_t*>(&persisted), size) ==
+                      size;
+  file.close();
+
+  return ok && persisted.magic == kMagic;
 }
 
+bool writePersisted(const PersistedWifi& persisted) {
+  if (SPIFFS.exists(kFilename) && !SPIFFS.remove(kFilename)) {
+    return false;
+  }
+
+  File file = SPIFFS.open(kFilename, "w", true);
+  if (!file) {
+    return false;
+  }
+
+  const bool ok = file.write(
+                      reinterpret_cast<const uint8_t*>(&persisted),
+                      sizeof(persisted)) == sizeof(persisted);
+  file.close();
+  return ok;
+}
+
+void copyString(char* destination, size_t capacity, const std::string& value) {
+  if (capacity == 0) {
+    return;
+  }
+
+  const size_t length = std::min(value.size(), capacity - 1);
+  std::memcpy(destination, value.data(), length);
+  destination[length] = '\0';
+}
 }  // namespace
 
 void MOWifiPrefs::defaults() {
@@ -26,58 +74,22 @@ void MOWifiPrefs::defaults() {
 bool MOWifiPrefs::load() {
   defaults();
 
-  if (!LittleFS.exists(kStoragePath)) {
+  PersistedWifi persisted{};
+  if (!readPersisted(persisted)) {
     return false;
   }
 
-  File file = LittleFS.open(kStoragePath, "r");
-  if (!file) {
-    return false;
-  }
-
-  String magic = file.readStringUntil('\n');
-  magic.trim();
-
-  if (magic != kMagic) {
-    file.close();
-    return false;
-  }
-
-  String version = file.readStringUntil('\n');
-  version.trim();
-
-  if (version.toInt() != static_cast<int>(kFormatVersion)) {
-    file.close();
-    return false;
-  }
-
-  readLine(file, ssid_);
-  readLine(file, password_);
-
-  file.close();
+  ssid_ = persisted.ssid;
+  password_ = persisted.password;
   return true;
 }
 
 bool MOWifiPrefs::save() const {
-  if (!LittleFS.exists("/multiobserver")) {
-    if (!LittleFS.mkdir("/multiobserver")) {
-      return false;
-    }
-  }
-
-  File file = LittleFS.open(kStoragePath, "w");
-  if (!file) {
-    return false;
-  }
-
-  file.println(kMagic);
-  file.println(kFormatVersion);
-  file.println(ssid_.c_str());
-  file.println(password_.c_str());
-
-  const bool ok = file.getWriteError() == 0;
-  file.close();
-  return ok;
+  PersistedWifi persisted{};
+  persisted.magic = kMagic;
+  copyString(persisted.ssid, sizeof(persisted.ssid), ssid_);
+  copyString(persisted.password, sizeof(persisted.password), password_);
+  return writePersisted(persisted);
 }
 
 const std::string& MOWifiPrefs::ssid() const noexcept {
@@ -88,10 +100,10 @@ const std::string& MOWifiPrefs::password() const noexcept {
   return password_;
 }
 
-void MOWifiPrefs::setSsid(const std::string& value) {
-  ssid_ = value;
+void MOWifiPrefs::setSsid(std::string value) {
+  ssid_ = std::move(value);
 }
 
-void MOWifiPrefs::setPassword(const std::string& value) {
-  password_ = value;
+void MOWifiPrefs::setPassword(std::string value) {
+  password_ = std::move(value);
 }

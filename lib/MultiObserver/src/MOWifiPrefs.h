@@ -4,9 +4,6 @@
 
 class MOWifiPrefs {
  public:
-  static constexpr const char* kStoragePath = "/multiobserver/wifi.cfg";
-  static constexpr uint32_t kFormatVersion = 1;
-
   void defaults();
   bool load();
   bool save() const;
@@ -14,8 +11,8 @@ class MOWifiPrefs {
   [[nodiscard]] const std::string& ssid() const noexcept;
   [[nodiscard]] const std::string& password() const noexcept;
 
-  void setSsid(const std::string& value);
-  void setPassword(const std::string& value);
+  void setSsid(std::string value);
+  void setPassword(std::string value);
 
  private:
   std::string ssid_;

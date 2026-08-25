@@ -11,18 +11,13 @@ void MOConfig::defaults() {
 
 bool MOConfig::load() {
   defaults();
-
-  const bool wifiOk = wifi_.load();
-  const bool mqttOk = mqtt_.load();
-
-  return wifiOk || mqttOk;
+  const bool wifi_ok = wifi_.load();
+  const bool mqtt_ok = mqtt_.load();
+  return wifi_ok && mqtt_ok;
 }
 
 bool MOConfig::save() {
-  const bool wifiOk = wifi_.save();
-  const bool mqttOk = mqtt_.save();
-
-  return wifiOk && mqttOk;
+  return wifi_.save() && mqtt_.save();
 }
 
 const MOWifiPrefs& MOConfig::wifi() const noexcept {
