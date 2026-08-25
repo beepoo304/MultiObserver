@@ -16,11 +16,14 @@ void MO::begin() {
     return;
   }
 
-  config_.load();
+  Serial.println("[MO] begin");
+  const bool configLoaded = config_.load();
+  Serial.printf("[MO] config load: %s\n", configLoaded ? "OK" : "defaults");
   wifi_.begin(config_.wifi().ssid(), config_.wifi().password());
   mqtt_.begin();
 
   started_ = true;
+  Serial.println("[MO] ready");
 }
 
 void MO::loop() {
@@ -120,8 +123,9 @@ bool MO::enqueueRx(const uint8_t* raw, size_t rawLength, uint8_t payloadType,
 bool MO::enqueueTx(const uint8_t* raw, size_t rawLength,
                    uint8_t payloadType, uint16_t payloadLength,
                    uint8_t routeType, uint8_t pathHashCount,
-                   uint8_t pathHashSize, const uint8_t* packetHash,
-                   size_t packetHashLength, uint32_t timestamp) noexcept {
+                   uint8_t pathHashSize, int8_t snrQuarter, int rssi,
+                   const uint8_t* packetHash, size_t packetHashLength,
+                   uint32_t timestamp) noexcept {
   if (!started_ || raw == nullptr || rawLength == 0 ||
       rawLength > kMaxRawPacketSize || txCount_ >= txQueue_.size()) {
     return false;
@@ -140,6 +144,8 @@ bool MO::enqueueTx(const uint8_t* raw, size_t rawLength,
   event.routeType = routeType;
   event.pathHashCount = pathHashCount;
   event.pathHashSize = pathHashSize;
+  event.snrQuarter = snrQuarter;
+  event.rssi = rssi;
   event.packetHashLength = packetHashLength;
   event.timestamp = timestamp;
 
@@ -181,6 +187,17 @@ void MO::setObserverIdentity(std::string origin, std::string originId) {
   }
 
   mqtt_.setObserverIdentity(observerId_);
+}
+
+void MO::setStatusSnapshot(const MOMQTT::StatusData& status) {
+  MOMQTT::StatusData snapshot = status;
+  if (snapshot.origin.empty()) {
+    snapshot.origin = observerOrigin_;
+  }
+  if (snapshot.originId.empty()) {
+    snapshot.originId = observerId_;
+  }
+  mqtt_.setStatusSnapshot(snapshot);
 }
 
 void MO::processRxEvent(const RxEvent& event) {
@@ -262,6 +279,14 @@ void MO::processRxEvent(const RxEvent& event) {
   };
 
   mqtt_.publishPacket(packet);
+
+  const MOMQTT::RawData raw{
+      .origin = observerOrigin_,
+      .originId = observerId_,
+      .timestamp = timestamp,
+      .data = rawHex,
+  };
+  mqtt_.publishRaw(raw);
 }
 
 void MO::processTxEvent(const TxEvent& event) {
@@ -270,7 +295,11 @@ void MO::processTxEvent(const TxEvent& event) {
   char length[12]{};
   char payloadLength[12]{};
   char packetType[8]{};
+  char snr[16]{};
+  char rssi[16]{};
   char timestamp[32]{};
+  char timeOnly[16]{};
+  char dateOnly[16]{};
   char path[32]{};
 
   appendHex(event.raw.data(), event.rawLength, rawHex, sizeof(rawHex));
@@ -283,7 +312,16 @@ void MO::processTxEvent(const TxEvent& event) {
                 static_cast<unsigned>(event.payloadLength));
   std::snprintf(packetType, sizeof(packetType), "%u",
                 static_cast<unsigned>(event.payloadType));
+  std::snprintf(snr, sizeof(snr), "%.1f",
+                static_cast<double>(event.snrQuarter) / 4.0);
+  std::snprintf(rssi, sizeof(rssi), "%d", event.rssi);
   formatTimestamp(event.timestamp, timestamp, sizeof(timestamp));
+  const time_t timeValue = static_cast<time_t>(event.timestamp);
+  struct tm utc{};
+  if (timeValue != 0 && gmtime_r(&timeValue, &utc) != nullptr) {
+    std::strftime(timeOnly, sizeof(timeOnly), "%H:%M:%S", &utc);
+    std::strftime(dateOnly, sizeof(dateOnly), "%d/%m/%Y", &utc);
+  }
 
   const char* route = "F";
   if (event.routeType == 2 || event.routeType == 3) {
@@ -302,16 +340,16 @@ void MO::processTxEvent(const TxEvent& event) {
       .origin = observerOrigin_,
       .originId = observerId_,
       .timestamp = timestamp,
-      .time = {},
-      .date = {},
+      .time = timeOnly,
+      .date = dateOnly,
       .direction = "tx",
       .length = length,
       .packetType = packetType,
       .route = route,
       .payloadLength = payloadLength,
       .raw = rawHex,
-      .snr = {},
-      .rssi = {},
+      .snr = snr,
+      .rssi = rssi,
       .hash = hashHex,
       .score = {},
       .duration = {},
@@ -319,6 +357,14 @@ void MO::processTxEvent(const TxEvent& event) {
   };
 
   mqtt_.publishPacket(packet);
+
+  const MOMQTT::RawData raw{
+      .origin = observerOrigin_,
+      .originId = observerId_,
+      .timestamp = timestamp,
+      .data = rawHex,
+  };
+  mqtt_.publishRaw(raw);
 }
 
 void MO::appendHex(const uint8_t* data, size_t length, char* output,

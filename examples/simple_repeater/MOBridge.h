@@ -16,9 +16,12 @@ class MOBridge {
 
   bool onRx(mesh::Packet* packet, int len, float score, int rssi, int duration) noexcept;
   bool onTx(mesh::Packet* packet, int len) noexcept;
+  bool onTx(mesh::Packet* packet, int len, int rssi, float snr) noexcept;
 
   void setObserverIdentity(const char* name,
                             const char* publicKeyHex) noexcept;
+
+  void setStatusSnapshot(const MOMQTT::StatusData& status) noexcept;
 
   bool handleCommand(uint32_t senderTimestamp, const char* command,
                      char* reply) noexcept;

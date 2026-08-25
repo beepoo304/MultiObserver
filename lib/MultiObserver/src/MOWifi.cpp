@@ -1,8 +1,11 @@
 #include "MOWifi.h"
 
+#include <Arduino.h>
+
 MOWifi::MOWifi() = default;
 
 void MOWifi::begin(const std::string& ssid, const std::string& password) {
+  Serial.println("[MO] WiFi start");
   setCredentials(ssid, password);
 
   WiFi.mode(WIFI_STA);
@@ -43,6 +46,7 @@ void MOWifi::connect() {
   if (WiFi.status() == WL_CONNECTED) {
     state_ = State::Connected;
     stateSinceMs_ = millis();
+    Serial.println("[MO] WiFi connected");
     return;
   }
 
@@ -94,6 +98,7 @@ void MOWifi::startConnection() {
   WiFi.begin(ssid_.c_str(), password_.c_str());
 
   state_ = State::Connecting;
+  Serial.println("[MO] WiFi connecting");
   stateSinceMs_ = millis();
 }
 
@@ -101,12 +106,14 @@ void MOWifi::handleConnecting(uint32_t now) {
   if (WiFi.status() == WL_CONNECTED) {
     state_ = State::Connected;
     stateSinceMs_ = now;
+    Serial.println("[MO] WiFi connected");
     return;
   }
 
   if (now - stateSinceMs_ >= kConnectTimeoutMs) {
     WiFi.disconnect(false, false);
     state_ = State::Disconnected;
+    Serial.println("[MO] WiFi connect timeout");
     stateSinceMs_ = now;
     retryAtMs_ = now + kRetryIntervalMs;
   }
@@ -120,6 +127,7 @@ void MOWifi::handleConnected(uint32_t now) {
   state_ = State::Disconnected;
   stateSinceMs_ = now;
   retryAtMs_ = now;
+  Serial.println("[MO] WiFi disconnected");
 }
 
 void MOWifi::handleDisconnected(uint32_t now) {

@@ -40,10 +40,12 @@ class MO {
   bool enqueueTx(const uint8_t* raw, size_t rawLength, uint8_t payloadType,
                  uint16_t payloadLength, uint8_t routeType,
                  uint8_t pathHashCount, uint8_t pathHashSize,
+                 int8_t snrQuarter, int rssi,
                  const uint8_t* packetHash, size_t packetHashLength,
                  uint32_t timestamp) noexcept;
 
   void setObserverIdentity(std::string origin, std::string originId);
+  void setStatusSnapshot(const MOMQTT::StatusData& status);
 
  private:
   struct RxEvent {
@@ -71,6 +73,8 @@ class MO {
     uint8_t routeType{0};
     uint8_t pathHashCount{0};
     uint8_t pathHashSize{0};
+    int8_t snrQuarter{0};
+    int rssi{0};
     std::array<uint8_t, kMaxHashSize> packetHash{};
     size_t packetHashLength{0};
     uint32_t timestamp{0};

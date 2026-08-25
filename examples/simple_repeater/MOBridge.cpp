@@ -40,11 +40,16 @@ bool MOBridge::onRx(mesh::Packet* packet, int len, float score, int rssi, int du
       raw, static_cast<size_t>(rawLength), packet->getPayloadType(),
       packet->payload_len, packet->getRouteType(),
       packet->getPathHashCount(), packet->getPathHashSize(),
-      packet->_snr, rssi, scoreValue, duration, packetHash,
+      static_cast<int8_t>(std::clamp(packet->getSNR() * 4.0F, -128.0F, 127.0F)), rssi, scoreValue, duration, packetHash,
       sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
 }
 
 bool MOBridge::onTx(mesh::Packet* packet, int len) noexcept {
+  return onTx(packet, len, 0, 0.0F);
+}
+
+bool MOBridge::onTx(mesh::Packet* packet, int len, int rssi,
+                    float snr) noexcept {
   if (packet == nullptr || len <= 0) {
     return false;
   }
@@ -59,11 +64,14 @@ bool MOBridge::onTx(mesh::Packet* packet, int len) noexcept {
   uint8_t packetHash[MO::kMaxHashSize]{};
   packet->calculatePacketHash(packetHash);
 
+  const int8_t snrQuarter = static_cast<int8_t>(
+      std::clamp(snr * 4.0F, -128.0F, 127.0F));
+
   return observer_.enqueueTx(
       raw, static_cast<size_t>(rawLength), packet->getPayloadType(),
       packet->payload_len, packet->getRouteType(),
-      packet->getPathHashCount(), packet->getPathHashSize(), packetHash,
-      sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
+      packet->getPathHashCount(), packet->getPathHashSize(), snrQuarter, rssi,
+      packetHash, sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
 }
 
 void MOBridge::setObserverIdentity(const char* name,
@@ -74,6 +82,11 @@ void MOBridge::setObserverIdentity(const char* name,
   }
 
   observer_.setObserverIdentity(name, publicKeyHex);
+}
+
+void MOBridge::setStatusSnapshot(
+    const MOMQTT::StatusData& status) noexcept {
+  observer_.setStatusSnapshot(status);
 }
 
 bool MOBridge::handleCommand(uint32_t senderTimestamp, const char* command,

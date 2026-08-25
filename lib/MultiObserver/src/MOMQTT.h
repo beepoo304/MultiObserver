@@ -73,16 +73,16 @@ class MOMQTT {
     std::string_view radio;
     std::string_view clientVersion;
     std::string_view repeat;
-    std::string_view batteryMv;
-    std::string_view uptimeSecs;
-    std::string_view errors;
-    std::string_view queueLen;
-    std::string_view noiseFloor;
-    std::string_view txAirSecs;
-    std::string_view rxAirSecs;
-    std::string_view recvErrors;
-    std::string_view packetsSent;
-    std::string_view packetsReceived;
+    uint32_t batteryMv{0};
+    uint32_t uptimeSecs{0};
+    uint32_t errors{0};
+    uint32_t queueLen{0};
+    int32_t noiseFloor{0};
+    uint32_t txAirSecs{0};
+    uint32_t rxAirSecs{0};
+    uint32_t recvErrors{0};
+    uint32_t packetsSent{0};
+    uint32_t packetsReceived{0};
   };
 
   MOMQTT(MOMQTTPrefs& prefs, MOWifi& wifi);
@@ -102,9 +102,12 @@ class MOMQTT {
   [[nodiscard]] BrokerStatus status(BrokerId broker) const noexcept;
   [[nodiscard]] bool connected(BrokerId broker) const noexcept;
 
-  void setObserverIdentity(std::string_view originId);\n\n  bool publishPacket(const PacketData& packet);
+  void setObserverIdentity(std::string_view originId);
+
+  bool publishPacket(const PacketData& packet);
   bool publishRaw(const RawData& raw);
   bool publishStatus(const StatusData& status, bool retain = true);
+  void setStatusSnapshot(const StatusData& status);
 
   bool queuePublish(BrokerId broker, std::string_view topic,
                     std::string_view payload, bool retain = false);
@@ -113,6 +116,13 @@ class MOMQTT {
   static constexpr size_t kPacketJsonBufferSize = 1280;
   static constexpr size_t kRawJsonBufferSize = 896;
   static constexpr size_t kStatusJsonBufferSize = 768;
+  static constexpr uint32_t kKeepAliveSeconds = 30;
+  static constexpr uint32_t kConnectTimeoutMs = 10'000;
+  static constexpr uint32_t kRetryBaseMs = 10'000;
+  static constexpr uint32_t kRetryMaxMs = 300'000;
+  static constexpr uint32_t kStatusIntervalMs = 300'000;
+  static constexpr size_t kMqttBufferSize = 768;
+  static constexpr size_t kMqttOutBufferSize = 1280;
 
   struct BrokerRuntime {
     esp_mqtt_client_handle_t client{nullptr};
@@ -123,6 +133,7 @@ class MOMQTT {
     esp_err_t lastError{ESP_OK};
     bool started{false};
     bool reconnectPending{false};
+    bool forcedEnabled{false};
   };
 
   static void onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
@@ -132,6 +143,7 @@ class MOMQTT {
   void ensureBroker(BrokerId broker, uint32_t now);
   bool startBroker(BrokerId broker, uint32_t now);
   void destroyBroker(BrokerId broker);
+  void disconnectRuntime(BrokerId broker, bool clearForced);
   void scheduleRetry(BrokerId broker, uint32_t now);
   void clearRuntime(BrokerId broker);
   bool hasConnectHeadroom(BrokerId broker) const;
@@ -139,6 +151,7 @@ class MOMQTT {
 
   bool buildClientConfig(BrokerId broker, esp_mqtt_client_config_t& config,
                          std::string& uri) const;
+  bool publishStoredStatus(bool online);
 
   bool buildTopic(std::string_view leaf, char* buffer, size_t bufferSize) const;
 
@@ -173,5 +186,27 @@ class MOMQTT {
   MOMQTTPrefs& prefs_;
   MOWifi& wifi_;
   std::array<BrokerRuntime, 2> brokers_{};
+  struct StoredStatus {
+    std::string status;
+    std::string origin;
+    std::string originId;
+    std::string model;
+    std::string firmwareVersion;
+    std::string radio;
+    std::string clientVersion;
+    std::string repeat;
+    uint32_t batteryMv{0};
+    uint32_t uptimeSecs{0};
+    uint32_t errors{0};
+    uint32_t queueLen{0};
+    int32_t noiseFloor{0};
+    uint32_t txAirSecs{0};
+    uint32_t rxAirSecs{0};
+    uint32_t recvErrors{0};
+    uint32_t packetsSent{0};
+    uint32_t packetsReceived{0};
+    bool valid{false};
+  } statusSnapshot_{};
+  uint32_t lastStatusPublishMs_{0};
   bool running_{false};
 };

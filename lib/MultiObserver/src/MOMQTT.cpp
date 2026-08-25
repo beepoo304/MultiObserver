@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <string>
+#include <ctime>
 
 namespace {
 
@@ -43,10 +44,15 @@ void MOMQTT::begin() {
   if (running_) return;
   brokers_.fill({});
   running_ = true;
+  Serial.println("[MO] MQTT1 start");
+  Serial.println("[MO] MQTT2 start");
 }
 
 void MOMQTT::end() {
   if (!running_) return;
+  if (statusSnapshot_.valid) {
+    publishStoredStatus(false);
+  }
   destroyBroker(BrokerId::Mqtt1);
   destroyBroker(BrokerId::Mqtt2);
   running_ = false;
@@ -60,7 +66,7 @@ void MOMQTT::loop() {
     for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
       BrokerRuntime& state = runtime(brokers_, broker);
       if (state.client != nullptr) destroyBroker(broker);
-      state.state = isEnabled(prefs(prefs_, broker))
+      state.state = (isEnabled(prefs(prefs_, broker)) || state.forcedEnabled)
                         ? State::WaitingForWiFi
                         : State::Disabled;
     }
@@ -71,7 +77,7 @@ void MOMQTT::loop() {
   for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     BrokerRuntime& state = runtime(brokers_, broker);
 
-    if (!isEnabled(prefs(prefs_, broker))) {
+    if (!isEnabled(prefs(prefs_, broker)) && !state.forcedEnabled) {
       if (state.client != nullptr) destroyBroker(broker);
       state.state = State::Disabled;
       continue;
@@ -92,10 +98,20 @@ void MOMQTT::loop() {
       }
     }
   }
+  if (statusSnapshot_.valid &&
+      static_cast<uint32_t>(now - lastStatusPublishMs_) >= kStatusIntervalMs) {
+    if (publishStoredStatus(true)) {
+      lastStatusPublishMs_ = now;
+    }
+  }
 }
 
 void MOMQTT::connect(BrokerId broker) {
-  if (!running_ || !isWiFiReady() || !isEnabled(prefs(prefs_, broker))) return;
+  if (!running_ || !isWiFiReady() ||
+      (!isEnabled(prefs(prefs_, broker)) &&
+       !runtime(brokers_, broker).forcedEnabled)) {
+    return;
+  }
   BrokerRuntime& state = runtime(brokers_, broker);
   state.reconnectPending = true;
   state.nextConnectAttemptMs = millis();
@@ -103,25 +119,41 @@ void MOMQTT::connect(BrokerId broker) {
 }
 
 void MOMQTT::disconnect(BrokerId broker) {
+  disconnectRuntime(broker, true);
+}
+
+void MOMQTT::disconnectRuntime(BrokerId broker, bool clearForced) {
   BrokerRuntime& state = runtime(brokers_, broker);
   if (state.client != nullptr) {
-    esp_mqtt_client_stop(state.client);
+    if (statusSnapshot_.valid && state.state == State::Connected) {
+      publishStoredStatus(false);
+    }
     destroyBroker(broker);
   } else {
     clearRuntime(broker);
   }
-  if (isEnabled(prefs(prefs_, broker))) {
+
+  if (clearForced) {
+    state.forcedEnabled = false;
+  }
+
+  if (isEnabled(prefs(prefs_, broker)) || state.forcedEnabled) {
     state.state = isWiFiReady() ? State::Disconnected : State::WaitingForWiFi;
+  } else {
+    state.state = State::Disabled;
   }
 }
 
 void MOMQTT::reconnect(BrokerId broker) {
-  disconnect(broker);
+  disconnectRuntime(broker, false);
   connect(broker);
 }
 
 void MOMQTT::restart(BrokerId broker) {
-  reconnect(broker);
+  BrokerRuntime& state = runtime(brokers_, broker);
+  state.forcedEnabled = true;
+  disconnectRuntime(broker, false);
+  connect(broker);
 }
 
 MOMQTT::BrokerStatus MOMQTT::status(BrokerId broker) const noexcept {
@@ -172,6 +204,7 @@ bool MOMQTT::publishRaw(const RawData& raw) {
 }
 
 bool MOMQTT::publishStatus(const StatusData& status, bool retain) {
+  setStatusSnapshot(status);
   char payload[kStatusJsonBufferSize];
   size_t length = 0;
   if (!buildStatusJson(status, payload, sizeof(payload), length)) return false;
@@ -185,6 +218,68 @@ bool MOMQTT::publishStatus(const StatusData& status, bool retain) {
                             retain);
   }
   return queued;
+}
+
+void MOMQTT::setStatusSnapshot(const StatusData& status) {
+  statusSnapshot_.status.assign(status.status.data(), status.status.size());
+  statusSnapshot_.origin.assign(status.origin.data(), status.origin.size());
+  statusSnapshot_.originId.assign(status.originId.data(), status.originId.size());
+  statusSnapshot_.model.assign(status.model.data(), status.model.size());
+  statusSnapshot_.firmwareVersion.assign(status.firmwareVersion.data(),
+                                         status.firmwareVersion.size());
+  statusSnapshot_.radio.assign(status.radio.data(), status.radio.size());
+  statusSnapshot_.clientVersion.assign(status.clientVersion.data(),
+                                       status.clientVersion.size());
+  statusSnapshot_.repeat.assign(status.repeat.data(), status.repeat.size());
+  statusSnapshot_.batteryMv = status.batteryMv;
+  statusSnapshot_.uptimeSecs = status.uptimeSecs;
+  statusSnapshot_.errors = status.errors;
+  statusSnapshot_.queueLen = status.queueLen;
+  statusSnapshot_.noiseFloor = status.noiseFloor;
+  statusSnapshot_.txAirSecs = status.txAirSecs;
+  statusSnapshot_.rxAirSecs = status.rxAirSecs;
+  statusSnapshot_.recvErrors = status.recvErrors;
+  statusSnapshot_.packetsSent = status.packetsSent;
+  statusSnapshot_.packetsReceived = status.packetsReceived;
+  statusSnapshot_.valid = true;
+}
+
+bool MOMQTT::publishStoredStatus(bool online) {
+  if (!statusSnapshot_.valid) {
+    return false;
+  }
+
+  char timestamp[32]{};
+  const time_t now = time(nullptr);
+  const tm* utc = gmtime(&now);
+  if (utc == nullptr ||
+      std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", utc) == 0) {
+    return false;
+  }
+
+  const std::string_view status = online ? "online" : "offline";
+  const StatusData data{
+      .status = status,
+      .timestamp = timestamp,
+      .origin = statusSnapshot_.origin,
+      .originId = statusSnapshot_.originId,
+      .model = statusSnapshot_.model,
+      .firmwareVersion = statusSnapshot_.firmwareVersion,
+      .radio = statusSnapshot_.radio,
+      .clientVersion = statusSnapshot_.clientVersion,
+      .repeat = statusSnapshot_.repeat,
+      .batteryMv = statusSnapshot_.batteryMv,
+      .uptimeSecs = statusSnapshot_.uptimeSecs,
+      .errors = statusSnapshot_.errors,
+      .queueLen = statusSnapshot_.queueLen,
+      .noiseFloor = statusSnapshot_.noiseFloor,
+      .txAirSecs = statusSnapshot_.txAirSecs,
+      .rxAirSecs = statusSnapshot_.rxAirSecs,
+      .recvErrors = statusSnapshot_.recvErrors,
+      .packetsSent = statusSnapshot_.packetsSent,
+      .packetsReceived = statusSnapshot_.packetsReceived,
+  };
+  return publishStatus(data, true);
 }
 
 bool MOMQTT::queuePublish(BrokerId broker, std::string_view topic,
@@ -228,8 +323,16 @@ void MOMQTT::handleMqttEvent(BrokerId broker,
       state.lastError = ESP_OK;
       state.reconnectPending = false;
       state.nextConnectAttemptMs = 0;
+      Serial.printf("[MO] %s connected\n",
+                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2");
+      if (statusSnapshot_.valid) {
+        publishStoredStatus(true);
+        lastStatusPublishMs_ = millis();
+      }
       break;
     case MQTT_EVENT_DISCONNECTED:
+      Serial.printf("[MO] %s disconnected\n",
+                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2");
       state.state = State::Backoff;
       scheduleRetry(broker, millis());
       break;
@@ -237,6 +340,9 @@ void MOMQTT::handleMqttEvent(BrokerId broker,
       state.lastError = event->error_handle != nullptr
                             ? event->error_handle->esp_tls_last_esp_err
                             : ESP_FAIL;
+      Serial.printf("[MO] %s error: %d\n",
+                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2",
+                    static_cast<int>(state.lastError));
       state.state = State::Error;
       scheduleRetry(broker, millis());
       break;
@@ -275,6 +381,69 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
     state.lastError = ESP_ERR_INVALID_ARG;
     return false;
   }
+
+  char statusTopic[192]{};
+  char offlinePayload[kStatusJsonBufferSize]{};
+  size_t offlineLength = 0;
+  if (!buildTopic("status", statusTopic, sizeof(statusTopic))) {
+    state.lastError = ESP_ERR_INVALID_ARG;
+    return false;
+  }
+
+  if (statusSnapshot_.valid) {
+    char timestamp[32]{};
+    const time_t nowTime = time(nullptr);
+    const tm* utc = gmtime(&nowTime);
+    if (utc == nullptr ||
+        std::strftime(timestamp, sizeof(timestamp), "%Y-%m-%dT%H:%M:%SZ", utc) == 0) {
+      state.lastError = ESP_ERR_INVALID_ARG;
+      return false;
+    }
+
+    const StatusData offline{
+        .status = "offline",
+        .timestamp = timestamp,
+        .origin = statusSnapshot_.origin,
+        .originId = statusSnapshot_.originId,
+        .model = statusSnapshot_.model,
+        .firmwareVersion = statusSnapshot_.firmwareVersion,
+        .radio = statusSnapshot_.radio,
+        .clientVersion = statusSnapshot_.clientVersion,
+        .repeat = statusSnapshot_.repeat,
+        .batteryMv = statusSnapshot_.batteryMv,
+        .uptimeSecs = statusSnapshot_.uptimeSecs,
+        .errors = statusSnapshot_.errors,
+        .queueLen = statusSnapshot_.queueLen,
+        .noiseFloor = statusSnapshot_.noiseFloor,
+        .txAirSecs = statusSnapshot_.txAirSecs,
+        .rxAirSecs = statusSnapshot_.rxAirSecs,
+        .recvErrors = statusSnapshot_.recvErrors,
+        .packetsSent = statusSnapshot_.packetsSent,
+        .packetsReceived = statusSnapshot_.packetsReceived,
+    };
+    if (!buildStatusJson(offline, offlinePayload, sizeof(offlinePayload),
+                          offlineLength)) {
+      state.lastError = ESP_ERR_NO_MEM;
+      return false;
+    }
+  } else {
+    const char fallback[] = "{\"status\":\"offline\"}";
+    std::memcpy(offlinePayload, fallback, sizeof(fallback));
+    offlineLength = sizeof(fallback) - 1;
+  }
+
+#if ESP_IDF_VERSION_MAJOR >= 5
+  config.session.last_will.topic = statusTopic;
+  config.session.last_will.msg = offlinePayload;
+  config.session.last_will.msg_len = offlineLength;
+  config.session.last_will.qos = 1;
+  config.session.last_will.retain = 1;
+#else
+  config.lwt_topic = statusTopic;
+  config.lwt_msg = offlinePayload;
+  config.lwt_qos = 1;
+  config.lwt_retain = 1;
+#endif
 
   esp_mqtt_client_handle_t client = esp_mqtt_client_init(&config);
   if (client == nullptr) {
@@ -355,7 +524,11 @@ bool MOMQTT::buildClientConfig(BrokerId broker,
                                esp_mqtt_client_config_t& config,
                                std::string& uri) const {
   const MOBrokerPrefs& brokerPrefs = prefs(prefs_, broker);
-  if (!isEnabled(brokerPrefs)) return false;
+  if (!isEnabled(brokerPrefs) &&
+      !runtime(brokers_, broker).forcedEnabled) {
+    return false;
+  }
+  if (brokerPrefs.host.empty() || brokerPrefs.port == 0) return false;
 
 #if ESP_IDF_VERSION_MAJOR >= 5
   config.credentials.username =
@@ -554,25 +727,36 @@ bool MOMQTT::buildStatusJson(const StatusData& s, char* buffer,
   if (!appendChar(buffer, bufferSize, length, '{')) return false;
   bool comma = false;
 
-  const auto add = [&](std::string_view key, std::string_view value) {
-    const bool ok = appendJsonString(buffer, bufferSize, length, key, value, comma);
+  const auto addString = [&](std::string_view key, std::string_view value) {
+    const bool ok =
+        appendJsonString(buffer, bufferSize, length, key, value, comma);
     if (ok) comma = true;
     return ok;
   };
 
-  if (!add("status", s.status) ||
-      !add("timestamp", s.timestamp) ||
-      !add("origin", s.origin) ||
-      !add("origin_id", s.originId) ||
-      !add("model", s.model) ||
-      !add("firmware_version", s.firmwareVersion) ||
-      !add("radio", s.radio) ||
-      !add("client_version", s.clientVersion) ||
-      !add("repeat", s.repeat)) {
-    return false;
-  }
+  const auto addNumber = [&](std::string_view key, auto value) {
+    char number[24]{};
+    const int written = std::snprintf(number, sizeof(number), "%ld",
+                                      static_cast<long>(value));
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(number)) {
+      return false;
+    }
+    const bool ok = appendJsonLiteral(buffer, bufferSize, length, key, number,
+                                      comma);
+    if (ok) comma = true;
+    return ok;
+  };
 
-  if (!appendChar(buffer, bufferSize, length, ',') ||
+  if (!addString("status", s.status) ||
+      !addString("timestamp", s.timestamp) ||
+      !addString("origin", s.origin) ||
+      !addString("origin_id", s.originId) ||
+      !addString("model", s.model) ||
+      !addString("firmware_version", s.firmwareVersion) ||
+      !addString("radio", s.radio) ||
+      !addString("client_version", s.clientVersion) ||
+      !addString("repeat", s.repeat) ||
+      !appendChar(buffer, bufferSize, length, ',') ||
       !appendChar(buffer, bufferSize, length, '"') ||
       !appendEscaped(buffer, bufferSize, length, "stats") ||
       !appendChar(buffer, bufferSize, length, '"') ||
@@ -582,10 +766,15 @@ bool MOMQTT::buildStatusJson(const StatusData& s, char* buffer,
   }
 
   bool statsComma = false;
-  const auto addStat = [&](std::string_view key, std::string_view value) {
-    if (value.empty()) return true;
-    const bool ok =
-        appendJsonString(buffer, bufferSize, length, key, value, statsComma);
+  const auto addStat = [&](std::string_view key, auto value) {
+    char number[24]{};
+    const int written = std::snprintf(number, sizeof(number), "%ld",
+                                      static_cast<long>(value));
+    if (written < 0 || static_cast<size_t>(written) >= sizeof(number)) {
+      return false;
+    }
+    const bool ok = appendJsonLiteral(buffer, bufferSize, length, key, number,
+                                      statsComma);
     if (ok) statsComma = true;
     return ok;
   };

@@ -84,19 +84,22 @@ bool MOCli::handleWifi(std::string_view command, char* reply) noexcept {
 
   if (command == "get wifi.status") {
     const auto& ssid = config_.wifi().ssid();
-    if (wifi_.connected()) {
-      char buffer[kReplyCapacity];
-      const int written = std::snprintf(
-          buffer, sizeof(buffer), "ON %s", ssid.empty() ? "" : ssid.c_str());
-      if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
-        return copyReply(reply, "ERR");
-      }
-      return copyReply(reply, buffer);
+    const char* state = "DISCONNECTED";
+    switch (wifi_.state()) {
+      case MOWifi::State::Connecting:
+        state = "CONNECTING";
+        break;
+      case MOWifi::State::Connected:
+        state = "CONNECTED";
+        break;
+      case MOWifi::State::Disconnected:
+        state = "DISCONNECTED";
+        break;
     }
 
     char buffer[kReplyCapacity];
-    const int written =
-        std::snprintf(buffer, sizeof(buffer), "OFF SSID: %s", ssid.c_str());
+    const int written = std::snprintf(
+        buffer, sizeof(buffer), "%s %s", state, ssid.c_str());
     if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
       return copyReply(reply, "ERR");
     }
@@ -137,15 +140,17 @@ bool MOCli::handleMqtt(std::string_view command, char* reply) noexcept {
   const std::string_view prefix = mqtt1 ? "mqtt1." : "mqtt2.";
 
   if (command == "get mqtt1.status" || command == "get mqtt2.status") {
+    const auto runtimeStatus = mqtt_.status(broker);
     const auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
                             ? config_.mqtt().mqtt1()
                             : config_.mqtt().mqtt2();
 
     char buffer[kReplyCapacity];
-    const char* state =
+    const char* configured =
         prefs.state == MOOnOff::On ? "ON" : "OFF";
     const int written = std::snprintf(
-        buffer, sizeof(buffer), "%s %s", state, prefs.host.c_str());
+        buffer, sizeof(buffer), "%s %s %s",
+        configured, stateName(runtimeStatus.state).data(), prefs.host.c_str());
     if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
       return copyReply(reply, "ERR");
     }
