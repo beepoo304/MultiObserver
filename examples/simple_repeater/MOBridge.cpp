@@ -44,6 +44,28 @@ bool MOBridge::onRx(mesh::Packet* packet, int len, float score, int rssi, int du
       sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
 }
 
+bool MOBridge::onTx(mesh::Packet* packet, int len) noexcept {
+  if (packet == nullptr || len <= 0) {
+    return false;
+  }
+
+  uint8_t raw[MO::kMaxRawPacketSize]{};
+  const int rawLength = packet->writeTo(raw);
+  if (rawLength <= 0 ||
+      static_cast<size_t>(rawLength) > sizeof(raw)) {
+    return false;
+  }
+
+  uint8_t packetHash[MO::kMaxHashSize]{};
+  packet->calculatePacketHash(packetHash);
+
+  return observer_.enqueueTx(
+      raw, static_cast<size_t>(rawLength), packet->getPayloadType(),
+      packet->payload_len, packet->getRouteType(),
+      packet->getPathHashCount(), packet->getPathHashSize(), packetHash,
+      sizeof(packetHash), static_cast<uint32_t>(time(nullptr)));
+}
+
 bool MOBridge::handleCommand(uint32_t senderTimestamp, const char* command,
                              char* reply) noexcept {
   return observer_.handleCommand(senderTimestamp, command, reply);

@@ -37,6 +37,13 @@ void MO::loop() {
     --rxCount_;
     processRxEvent(event);
   }
+
+  while (txCount_ != 0) {
+    const TxEvent event = txQueue_[txTail_];
+    txTail_ = (txTail_ + 1) % txQueue_.size();
+    --txCount_;
+    processTxEvent(event);
+  }
 }
 
 void MO::end() {
@@ -50,6 +57,9 @@ void MO::end() {
   rxHead_ = 0;
   rxTail_ = 0;
   rxCount_ = 0;
+  txHead_ = 0;
+  txTail_ = 0;
+  txCount_ = 0;
   started_ = false;
 }
 
@@ -104,6 +114,42 @@ bool MO::enqueueRx(const uint8_t* raw, size_t rawLength, uint8_t payloadType,
 
   rxHead_ = (rxHead_ + 1) % rxQueue_.size();
   ++rxCount_;
+  return true;
+}
+
+bool MO::enqueueTx(const uint8_t* raw, size_t rawLength,
+                   uint8_t payloadType, uint16_t payloadLength,
+                   uint8_t routeType, uint8_t pathHashCount,
+                   uint8_t pathHashSize, const uint8_t* packetHash,
+                   size_t packetHashLength, uint32_t timestamp) noexcept {
+  if (!started_ || raw == nullptr || rawLength == 0 ||
+      rawLength > kMaxRawPacketSize || txCount_ >= txQueue_.size()) {
+    return false;
+  }
+
+  if (packetHashLength > kMaxHashSize) {
+    return false;
+  }
+
+  TxEvent& event = txQueue_[txHead_];
+  event.rawLength = rawLength;
+  std::memcpy(event.raw.data(), raw, rawLength);
+
+  event.payloadType = payloadType;
+  event.payloadLength = payloadLength;
+  event.routeType = routeType;
+  event.pathHashCount = pathHashCount;
+  event.pathHashSize = pathHashSize;
+  event.packetHashLength = packetHashLength;
+  event.timestamp = timestamp;
+
+  std::fill(event.packetHash.begin(), event.packetHash.end(), 0);
+  if (packetHash != nullptr && packetHashLength != 0) {
+    std::memcpy(event.packetHash.data(), packetHash, packetHashLength);
+  }
+
+  txHead_ = (txHead_ + 1) % txQueue_.size();
+  ++txCount_;
   return true;
 }
 
@@ -187,6 +233,63 @@ void MO::processRxEvent(const RxEvent& event) {
       .hash = hashHex,
       .score = scoreString,
       .duration = event.duration >= 0 ? std::string_view(duration) : std::string_view{},
+      .path = pathView,
+  };
+
+  mqtt_.publishPacket(packet);
+}
+
+void MO::processTxEvent(const TxEvent& event) {
+  char rawHex[(kMaxRawPacketSize * 2) + 1]{};
+  char hashHex[(kMaxHashSize * 2) + 1]{};
+  char length[12]{};
+  char payloadLength[12]{};
+  char packetType[8]{};
+  char timestamp[32]{};
+  char path[32]{};
+
+  appendHex(event.raw.data(), event.rawLength, rawHex, sizeof(rawHex));
+  appendHex(event.packetHash.data(), event.packetHashLength, hashHex,
+            sizeof(hashHex));
+
+  std::snprintf(length, sizeof(length), "%u",
+                static_cast<unsigned>(event.rawLength));
+  std::snprintf(payloadLength, sizeof(payloadLength), "%u",
+                static_cast<unsigned>(event.payloadLength));
+  std::snprintf(packetType, sizeof(packetType), "%u",
+                static_cast<unsigned>(event.payloadType));
+  formatTimestamp(event.timestamp, timestamp, sizeof(timestamp));
+
+  const char* route = "F";
+  if (event.routeType == 2 || event.routeType == 3) {
+    route = "D";
+    std::snprintf(path, sizeof(path), "path_%ux%u_%ub",
+                  static_cast<unsigned>(event.pathHashCount),
+                  static_cast<unsigned>(event.pathHashSize),
+                  static_cast<unsigned>(
+                      event.pathHashCount * event.pathHashSize));
+  }
+
+  const std::string_view pathView =
+      route[0] == 'D' ? std::string_view(path) : std::string_view{};
+
+  MOMQTT::PacketData packet{
+      .origin = observerOrigin_,
+      .originId = observerId_,
+      .timestamp = timestamp,
+      .time = {},
+      .date = {},
+      .direction = "tx",
+      .length = length,
+      .packetType = packetType,
+      .route = route,
+      .payloadLength = payloadLength,
+      .raw = rawHex,
+      .snr = {},
+      .rssi = {},
+      .hash = hashHex,
+      .score = {},
+      .duration = {},
       .path = pathView,
   };
 

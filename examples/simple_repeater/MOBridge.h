@@ -15,6 +15,7 @@ class MOBridge {
   void end();
 
   bool onRx(mesh::Packet* packet, int len, float score, int rssi, int duration) noexcept;
+  bool onTx(mesh::Packet* packet, int len) noexcept;
 
   bool handleCommand(uint32_t senderTimestamp, const char* command,
                      char* reply) noexcept;
