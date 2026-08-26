@@ -98,6 +98,10 @@ void MOBridge::setObserverIdentity(const char* name,
   observer_.setObserverIdentity(name, publicKeyHex);
 }
 
+void MOBridge::setAlertSender(AlertSender sender, void* context) noexcept {
+  observer_.setAlertSender(sender, context);
+}
+
 void MOBridge::setStatusSnapshot(
     const StatusSnapshot& status) noexcept {
   MOMQTT::StatusData mqtt_status{

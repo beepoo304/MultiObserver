@@ -10,6 +10,7 @@
 
 MO::MO()
     : mqtt_(config_.mqtt(), wifi_),
+      alertChannel_(config_.etap2()),
       watchdog_(config_.etap2(), wifi_, mqtt_),
       cli_(config_, wifi_, mqtt_) {}
 
@@ -23,6 +24,7 @@ void MO::begin() {
   Serial.printf("[MO] config load: %s\n", configLoaded ? "OK" : "defaults");
   wifi_.begin(config_.wifi().ssid(), config_.wifi().password());
   mqtt_.begin();
+  watchdog_.setAlertSink(&MO::forwardWatchdogAlert, this);
   watchdog_.begin();
 
   started_ = true;
@@ -202,6 +204,15 @@ void MO::setStatusSnapshot(const MOMQTT::StatusData& status) {
     snapshot.originId = observerId_;
   }
   mqtt_.setStatusSnapshot(snapshot);
+}
+
+void MO::setAlertSender(AlertSender sender, void* context) noexcept {
+  alertChannel_.setSender(sender, context);
+}
+
+bool MO::forwardWatchdogAlert(void* context, const char* text) {
+  return context != nullptr &&
+         static_cast<MO*>(context)->alertChannel_.send(text);
 }
 
 void MO::processRxEvent(const RxEvent& event) {

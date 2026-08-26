@@ -335,6 +335,80 @@ def patch_mymesh_cpp(text: str) -> str:
 
     return text
 
+def patch_alert_channel_bridge(mymesh_h: str, mymesh_cpp: str) -> tuple[str, str]:
+    marker = "MULTIOBSERVER: native alert queue bridge v1"
+    declaration = (
+        "  bool enqueueMultiObserverAlert(const uint8_t* secret, "
+        "size_t secretLength, const char* text);"
+    )
+    if declaration not in mymesh_h:
+        anchor = "  const char* getNodeName() { return _prefs.node_name; }"
+        if mymesh_h.count(anchor) != 1:
+            raise InstallError("Cannot locate MyMesh public API for alert bridge.")
+        mymesh_h = mymesh_h.replace(anchor, anchor + "\n" + declaration, 1)
+
+    if marker in mymesh_cpp:
+        return mymesh_h, mymesh_cpp
+
+    global_anchor = "MOBridge mo_bridge;"
+    if mymesh_cpp.count(global_anchor) != 1:
+        raise InstallError("Cannot locate unique MultiObserver bridge instance.")
+    callback = """MOBridge mo_bridge;
+
+namespace {
+bool moEnqueueAlert(void* context, const uint8_t* secret,
+                    size_t secretLength, const char* text) {
+  return context != nullptr &&
+         static_cast<MyMesh*>(context)->enqueueMultiObserverAlert(
+             secret, secretLength, text);
+}
+}  // namespace
+// MULTIOBSERVER: native alert queue bridge v1"""
+    mymesh_cpp = mymesh_cpp.replace(global_anchor, callback, 1)
+
+    begin_anchor = "void MyMesh::begin(FILESYSTEM *fs) {"
+    if mymesh_cpp.count(begin_anchor) != 1:
+        raise InstallError("Cannot locate unique MyMesh::begin for alert bridge.")
+    implementation = """bool MyMesh::enqueueMultiObserverAlert(
+    const uint8_t* secret, size_t secretLength, const char* text) {
+  if (secret == nullptr || (secretLength != 16 && secretLength != 32) ||
+      text == nullptr) {
+    return false;
+  }
+
+  mesh::GroupChannel channel{};
+  memcpy(channel.secret, secret, secretLength);
+  mesh::Utils::sha256(channel.hash, sizeof(channel.hash), channel.secret,
+                      secretLength);
+
+  uint8_t payload[5 + MAX_TEXT_LEN + 32]{};
+  const uint32_t timestamp = getRTCClock()->getCurrentTime();
+  memcpy(payload, &timestamp, sizeof(timestamp));
+  payload[4] = 0;  // TXT_TYPE_PLAIN
+  const int prefixLength = snprintf(reinterpret_cast<char*>(&payload[5]),
+                                    sizeof(payload) - 5, "%s: ", getNodeName());
+  if (prefixLength < 0 || prefixLength >= MAX_TEXT_LEN) return false;
+  size_t textLength = strlen(text);
+  const size_t textCapacity = static_cast<size_t>(MAX_TEXT_LEN - prefixLength);
+  if (textLength > textCapacity) textLength = textCapacity;
+  memcpy(&payload[5 + prefixLength], text, textLength);
+
+  mesh::Packet* packet = createGroupDatagram(
+      PAYLOAD_TYPE_GRP_TXT, channel, payload, 5 + prefixLength + textLength);
+  if (packet == nullptr) return false;
+  sendFloodScoped(default_scope, packet, 0, _prefs.path_hash_mode + 1);
+  return true;
+}
+
+"""
+    mymesh_cpp = mymesh_cpp.replace(begin_anchor, implementation + begin_anchor, 1)
+    mymesh_cpp = mymesh_cpp.replace(
+        begin_anchor,
+        begin_anchor + "\n  mo_bridge.setAlertSender(&moEnqueueAlert, this);",
+        1,
+    )
+    return mymesh_h, mymesh_cpp
+
 def patch_tx_led_mymesh(text: str) -> str:
     # MeshCore's radio wrapper already calls onAfterTransmit() on success and
     # failure. Strip the redundant MO guards from v1/v2 installations.

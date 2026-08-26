@@ -10,7 +10,8 @@ class MOEtap2Prefs {
   static constexpr uint16_t kDefaultGraceSeconds = 120;
   static constexpr uint16_t kMinGraceSeconds = 120;
   static constexpr uint16_t kMaxGraceSeconds = 300;
-  static constexpr size_t kChannelKeyHexLength = 64;
+  static constexpr size_t kChannelKeyHexLength = 32;
+  static constexpr size_t kChannelKeyMaxHexLength = 64;
 
   void defaults();
   bool load();

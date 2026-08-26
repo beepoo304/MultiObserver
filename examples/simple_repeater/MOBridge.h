@@ -10,6 +10,7 @@ class Packet;
 
 class MOBridge {
  public:
+  using AlertSender = MO::AlertSender;
   void begin();
   void loop();
   void end();
@@ -42,6 +43,7 @@ class MOBridge {
 
   void setObserverIdentity(const char* name,
                           const char* publicKeyHex) noexcept;
+  void setAlertSender(AlertSender sender, void* context) noexcept;
 
   void setStatusSnapshot(const StatusSnapshot& status) noexcept;
 

@@ -21,12 +21,13 @@ struct PersistedPrefs {
   uint8_t watchdogEnabled;
   uint16_t graceSeconds;
   uint8_t channelEnabled;
-  char channelKey[MOEtap2Prefs::kChannelKeyHexLength + 1];
+  char channelKey[MOEtap2Prefs::kChannelKeyMaxHexLength + 1];
 };
 
 bool validKey(std::string_view key) {
   if (key.empty()) return true;
-  if (key.size() != MOEtap2Prefs::kChannelKeyHexLength) return false;
+  if (key.size() != MOEtap2Prefs::kChannelKeyHexLength &&
+      key.size() != MOEtap2Prefs::kChannelKeyMaxHexLength) return false;
   return std::all_of(key.begin(), key.end(), [](unsigned char c) {
     return std::isxdigit(c) != 0;
   });

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "MOConfig.h"
+#include "MOAlertChannel.h"
 #include "MOCli.h"
 #include "MOMQTT.h"
 #include "MOWatchdog.h"
@@ -13,6 +14,7 @@
 
 class MO {
  public:
+  using AlertSender = MOAlertChannel::Sender;
   static constexpr size_t kRxQueueCapacity = 8;
   static constexpr size_t kTxQueueCapacity = 4;
   static constexpr size_t kMaxRawPacketSize = 256;
@@ -47,6 +49,7 @@ class MO {
 
   void setObserverIdentity(std::string origin, std::string originId);
   void setStatusSnapshot(const MOMQTT::StatusData& status);
+  void setAlertSender(AlertSender sender, void* context) noexcept;
 
  private:
   struct RxEvent {
@@ -87,10 +90,12 @@ class MO {
                         size_t outputCapacity) noexcept;
   static void formatTimestamp(uint32_t timestamp, char* output,
                               size_t outputCapacity) noexcept;
+  static bool forwardWatchdogAlert(void* context, const char* text);
 
   MOConfig config_;
   MOWifi wifi_;
   MOMQTT mqtt_;
+  MOAlertChannel alertChannel_;
   MOWatchdog watchdog_;
   MOCli cli_;
 

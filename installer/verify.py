@@ -42,6 +42,7 @@ MO_FILES = [
     "MOConfig.h", "MOConfig.cpp",
     "MOEtap2Prefs.h", "MOEtap2Prefs.cpp",
     "MOWatchdog.h", "MOWatchdog.cpp",
+    "MOAlertChannel.h", "MOAlertChannel.cpp",
     "MOMQTT.h", "MOMQTT.cpp",
     "MOMQTTPrefs.h", "MOMQTTPrefs.cpp",
     "MOWifi.h", "MOWifi.cpp",
@@ -175,6 +176,12 @@ def main() -> int:
         "CLI hook": mymesh_cpp.count(
             "if (mo_bridge.handleCommand(sender_timestamp, command, reply))"
         ) == 1,
+        "native alert queue bridge": "MULTIOBSERVER: native alert queue bridge v1" in mymesh_cpp
+        and "createGroupDatagram(" in mymesh_cpp
+        and "sendFloodScoped(default_scope, packet" in mymesh_cpp
+        and "mo_bridge.setAlertSender(&moEnqueueAlert, this);" in mymesh_cpp,
+        "no MultiObserver alert queue": "alertQueue" not in mymesh_cpp
+        and "retryAlert" not in mymesh_cpp,
         "MOMQTT status": "publishStatus" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "MOMQTT LWT": "last_will" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "RAW publish": "mqtt_.publishRaw(raw)" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),
