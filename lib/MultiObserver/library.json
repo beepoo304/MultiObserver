@@ -1,0 +1,17 @@
+{
+  "name": "MultiObserver",
+  "version": "0.1.0",
+  "description": "MultiObserver extension for the MeshCore simple repeater",
+  "keywords": [
+    "meshcore",
+    "observer",
+    "mqtt",
+    "lora"
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src",
+    "includeDir": "src"
+  }
+}
