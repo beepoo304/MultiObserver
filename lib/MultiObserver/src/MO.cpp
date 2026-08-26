@@ -278,6 +278,13 @@ void MO::processRxEvent(const RxEvent& event) {
       .path = pathView,
   };
 
+  Serial.printf(
+      "[MO][PACKET] dir=rx type=%u payload_len=%u rssi=%d snr=%.1f score=%d duration=%d\n",
+      static_cast<unsigned>(event.payloadType),
+      static_cast<unsigned>(event.payloadLength), event.rssi,
+      static_cast<double>(event.snrQuarter) / 4.0, event.score,
+      event.duration);
+
   mqtt_.publishPacket(packet);
 
   const MOMQTT::RawData raw{
@@ -355,6 +362,12 @@ void MO::processTxEvent(const TxEvent& event) {
       .duration = {},
       .path = pathView,
   };
+
+  Serial.printf(
+      "[MO][PACKET] dir=tx type=%u payload_len=%u rssi=%d snr=%.1f\n",
+      static_cast<unsigned>(event.payloadType),
+      static_cast<unsigned>(event.payloadLength), event.rssi,
+      static_cast<double>(event.snrQuarter) / 4.0);
 
   mqtt_.publishPacket(packet);
 

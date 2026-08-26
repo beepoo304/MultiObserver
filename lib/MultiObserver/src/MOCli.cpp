@@ -83,26 +83,8 @@ bool MOCli::handleWifi(std::string_view command, char* reply) noexcept {
   }
 
   if (command == "get wifi.status") {
-    const auto& ssid = config_.wifi().ssid();
-    const char* state = "DISCONNECTED";
-    switch (wifi_.state()) {
-      case MOWifi::State::Connecting:
-        state = "CONNECTING";
-        break;
-      case MOWifi::State::Connected:
-        state = "CONNECTED";
-        break;
-      case MOWifi::State::Disconnected:
-        state = "DISCONNECTED";
-        break;
-    }
-
-    char buffer[kReplyCapacity];
-    const int written = std::snprintf(
-        buffer, sizeof(buffer), "%s %s", state, ssid.c_str());
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
-      return copyReply(reply, "ERR");
-    }
+    char buffer[kReplyCapacity]{};
+    wifi_.formatStatus(buffer, sizeof(buffer));
     return copyReply(reply, buffer);
   }
 
@@ -149,8 +131,10 @@ bool MOCli::handleMqtt(std::string_view command, char* reply) noexcept {
     const char* configured =
         prefs.state == MOOnOff::On ? "ON" : "OFF";
     const int written = std::snprintf(
-        buffer, sizeof(buffer), "%s %s %s",
-        configured, stateName(runtimeStatus.state).data(), prefs.host.c_str());
+        buffer, sizeof(buffer), "%s %s %s failures=%lu err=0x%x",
+        configured, stateName(runtimeStatus.state).data(), prefs.host.c_str(),
+        static_cast<unsigned long>(runtimeStatus.reconnectFailures),
+        static_cast<unsigned>(runtimeStatus.lastError));
     if (written < 0 || static_cast<size_t>(written) >= sizeof(buffer)) {
       return copyReply(reply, "ERR");
     }
@@ -486,6 +470,8 @@ std::string_view MOCli::stateName(MOMQTT::State state) noexcept {
       return "DISABLED";
     case MOMQTT::State::WaitingForWiFi:
       return "WAITING_WIFI";
+    case MOMQTT::State::WaitingForTime:
+      return "WAITING_TIME";
     case MOMQTT::State::Disconnected:
       return "DISCONNECTED";
     case MOMQTT::State::Connecting:

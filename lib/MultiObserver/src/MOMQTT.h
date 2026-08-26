@@ -23,6 +23,7 @@ class MOMQTT {
   enum class State : uint8_t {
     Disabled,
     WaitingForWiFi,
+    WaitingForTime,
     Disconnected,
     Connecting,
     Connected,
@@ -134,6 +135,7 @@ class MOMQTT {
     bool started{false};
     bool reconnectPending{false};
     bool forcedEnabled{false};
+    uint32_t connectedSinceMs{0};
   };
 
   static void onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
@@ -148,6 +150,8 @@ class MOMQTT {
   void clearRuntime(BrokerId broker);
   bool hasConnectHeadroom(BrokerId broker) const;
   bool isWiFiReady() const;
+  bool isNetworkReady() const;
+  State networkWaitState() const;
 
   bool buildClientConfig(BrokerId broker, esp_mqtt_client_config_t& config,
                          std::string& uri) const;
@@ -182,7 +186,9 @@ class MOMQTT {
 
   static size_t index(BrokerId broker) noexcept;
   static uint32_t retryDelayMs(uint32_t failures) noexcept;
+  static const char* brokerName(BrokerId broker) noexcept;
 
+  std::string observerId_;
   MOMQTTPrefs& prefs_;
   MOWifi& wifi_;
   std::array<BrokerRuntime, 2> brokers_{};

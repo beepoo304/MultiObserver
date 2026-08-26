@@ -5,6 +5,10 @@
 #include <esp_crt_bundle.h>
 #include <esp_heap_caps.h>
 
+#if defined(CONFIG_MBEDTLS_CERTIFICATE_BUNDLE)
+extern "C" esp_err_t esp_crt_bundle_attach(void* conf);
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -44,8 +48,8 @@ void MOMQTT::begin() {
   if (running_) return;
   brokers_.fill({});
   running_ = true;
-  Serial.println("[MO] MQTT1 start");
-  Serial.println("[MO] MQTT2 start");
+  Serial.println("[MO][MQTT1] runtime start");
+  Serial.println("[MO][MQTT2] runtime start");
 }
 
 void MOMQTT::end() {
@@ -62,18 +66,32 @@ void MOMQTT::loop() {
   if (!running_) return;
   const uint32_t now = millis();
 
-  if (!isWiFiReady()) {
+  if (!isNetworkReady()) {
     for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
       BrokerRuntime& state = runtime(brokers_, broker);
       if (state.client != nullptr) destroyBroker(broker);
-      state.state = (isEnabled(prefs(prefs_, broker)) || state.forcedEnabled)
-                        ? State::WaitingForWiFi
-                        : State::Disabled;
+      const State next =
+          (isEnabled(prefs(prefs_, broker)) || state.forcedEnabled)
+              ? networkWaitState()
+              : State::Disabled;
+      if (state.state != next) {
+        Serial.printf("[MO][%s] wait t=%lu wifi=%s ntp=%s\n",
+                      brokerName(broker),
+                      static_cast<unsigned long>(now),
+                      isWiFiReady() ? "up" : "down",
+                      wifi_.hasTimeSync() ? "synced" : "wait");
+      }
+      state.state = next;
     }
     return;
   }
 
-  bool connectStarted = false;
+  // Keep peak TLS heap usage bounded: finish the current broker handshake
+  // before starting the other one.
+  bool connectStarted = std::any_of(
+      brokers_.begin(), brokers_.end(), [](const BrokerRuntime& state) {
+        return state.client != nullptr && state.state == State::Connecting;
+      });
   for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     BrokerRuntime& state = runtime(brokers_, broker);
 
@@ -83,8 +101,20 @@ void MOMQTT::loop() {
       continue;
     }
 
+    if (state.state == State::WaitingForWiFi ||
+        state.state == State::WaitingForTime) {
+      state.state = State::Disconnected;
+      state.reconnectPending = true;
+      state.nextConnectAttemptMs = now;
+      Serial.printf("[MO][%s] network ready t=%lu connect=scheduled\n",
+                    brokerName(broker), static_cast<unsigned long>(now));
+    }
+
     if (state.client != nullptr && state.state == State::Connecting &&
         now - state.lastConnectAttemptMs >= kConnectTimeoutMs) {
+      Serial.printf("[MO][%s] connect timeout t=%lu elapsed_ms=%lu\n",
+                    brokerName(broker), static_cast<unsigned long>(now),
+                    static_cast<unsigned long>(now - state.lastConnectAttemptMs));
       destroyBroker(broker);
       scheduleRetry(broker, now);
     }
@@ -107,12 +137,19 @@ void MOMQTT::loop() {
 }
 
 void MOMQTT::connect(BrokerId broker) {
-  if (!running_ || !isWiFiReady() ||
+  if (!running_ ||
       (!isEnabled(prefs(prefs_, broker)) &&
        !runtime(brokers_, broker).forcedEnabled)) {
     return;
   }
   BrokerRuntime& state = runtime(brokers_, broker);
+  if (!isNetworkReady()) {
+    state.state = networkWaitState();
+    Serial.printf("[MO][%s] connect deferred wifi=%s ntp=%s\n",
+                  brokerName(broker), isWiFiReady() ? "up" : "down",
+                  wifi_.hasTimeSync() ? "synced" : "wait");
+    return;
+  }
   state.reconnectPending = true;
   state.nextConnectAttemptMs = millis();
   state.state = State::Disconnected;
@@ -138,7 +175,7 @@ void MOMQTT::disconnectRuntime(BrokerId broker, bool clearForced) {
   }
 
   if (isEnabled(prefs(prefs_, broker)) || state.forcedEnabled) {
-    state.state = isWiFiReady() ? State::Disconnected : State::WaitingForWiFi;
+    state.state = isNetworkReady() ? State::Disconnected : networkWaitState();
   } else {
     state.state = State::Disabled;
   }
@@ -316,6 +353,9 @@ void MOMQTT::onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
 void MOMQTT::handleMqttEvent(BrokerId broker,
                              esp_mqtt_event_handle_t event) {
   BrokerRuntime& state = runtime(brokers_, broker);
+  const uint32_t now = millis();
+  const uint32_t connectedFor =
+      state.connectedSinceMs == 0 ? 0 : now - state.connectedSinceMs;
   switch (event->event_id) {
     case MQTT_EVENT_CONNECTED:
       state.state = State::Connected;
@@ -323,28 +363,58 @@ void MOMQTT::handleMqttEvent(BrokerId broker,
       state.lastError = ESP_OK;
       state.reconnectPending = false;
       state.nextConnectAttemptMs = 0;
-      Serial.printf("[MO] %s connected\n",
-                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2");
+      state.connectedSinceMs = now;
+      Serial.printf(
+          "[MO][%s] connected t=%lu free_heap=%u largest_heap=%u\n",
+          brokerName(broker), static_cast<unsigned long>(now),
+          static_cast<unsigned>(
+              heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+          static_cast<unsigned>(heap_caps_get_largest_free_block(
+              MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
       if (statusSnapshot_.valid) {
         publishStoredStatus(true);
         lastStatusPublishMs_ = millis();
       }
       break;
     case MQTT_EVENT_DISCONNECTED:
-      Serial.printf("[MO] %s disconnected\n",
-                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2");
+      Serial.printf(
+          "[MO][%s] disconnected t=%lu wifi_code=%d rssi=%d connected_ms=%lu\n",
+          brokerName(broker), static_cast<unsigned long>(now),
+          static_cast<int>(WiFi.status()), WiFi.RSSI(),
+          static_cast<unsigned long>(connectedFor));
+      state.connectedSinceMs = 0;
       state.state = State::Backoff;
-      scheduleRetry(broker, millis());
+      scheduleRetry(broker, now);
       break;
     case MQTT_EVENT_ERROR:
       state.lastError = event->error_handle != nullptr
                             ? event->error_handle->esp_tls_last_esp_err
                             : ESP_FAIL;
-      Serial.printf("[MO] %s error: %d\n",
-                    broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2",
-                    static_cast<int>(state.lastError));
+      if (event->error_handle != nullptr) {
+        Serial.printf(
+            "[MO][%s] error t=%lu type=%d tls_esp=0x%x tls_stack=0x%x "
+            "cert_flags=0x%x sock_errno=%d conn_refused=%d wifi_code=%d "
+            "rssi=%d connected_ms=%lu\n",
+            brokerName(broker), static_cast<unsigned long>(now),
+            event->error_handle->error_type,
+            event->error_handle->esp_tls_last_esp_err,
+            event->error_handle->esp_tls_stack_err,
+            event->error_handle->esp_tls_cert_verify_flags,
+            event->error_handle->esp_transport_sock_errno,
+            event->error_handle->connect_return_code,
+            static_cast<int>(WiFi.status()), WiFi.RSSI(),
+            static_cast<unsigned long>(connectedFor));
+      } else {
+        Serial.printf("[MO][%s] error t=%lu no_error_handle\n",
+                      brokerName(broker), static_cast<unsigned long>(now));
+      }
+      state.connectedSinceMs = 0;
       state.state = State::Error;
-      scheduleRetry(broker, millis());
+      scheduleRetry(broker, now);
+      break;
+    case MQTT_EVENT_BEFORE_CONNECT:
+      Serial.printf("[MO][%s] before connect t=%lu\n", brokerName(broker),
+                    static_cast<unsigned long>(now));
       break;
     default:
       break;
@@ -363,12 +433,18 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
     state.state = State::Backoff;
     state.reconnectPending = true;
     state.nextConnectAttemptMs = now + kRetryBaseMs;
+    Serial.printf("[MO][%s] deferred: insufficient heap retry_ms=%lu\n",
+                  brokerName(broker),
+                  static_cast<unsigned long>(kRetryBaseMs));
     return;
   }
 
   state.reconnectPending = false;
   state.lastConnectAttemptMs = now;
   state.state = State::Connecting;
+  Serial.printf("[MO][%s] connecting t=%lu attempt=%lu\n",
+                brokerName(broker), static_cast<unsigned long>(now),
+                static_cast<unsigned long>(state.reconnectFailures + 1));
   if (!startBroker(broker, now)) scheduleRetry(broker, now);
 }
 
@@ -379,8 +455,20 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
 
   if (!buildClientConfig(broker, config, uri)) {
     state.lastError = ESP_ERR_INVALID_ARG;
+    Serial.printf("[MO][%s] invalid broker configuration\n", brokerName(broker));
     return false;
   }
+
+  const MOBrokerPrefs& brokerPrefs = prefs(prefs_, broker);
+  Serial.printf(
+      "[MO][%s] init host=%s port=%u transport=%s free_heap=%u largest_heap=%u\n",
+      brokerName(broker), brokerPrefs.host.c_str(),
+      static_cast<unsigned>(brokerPrefs.port),
+      transportName(brokerPrefs.transport),
+      static_cast<unsigned>(
+          heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)),
+      static_cast<unsigned>(heap_caps_get_largest_free_block(
+          MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)));
 
   char statusTopic[192]{};
   char offlinePayload[kStatusJsonBufferSize]{};
@@ -448,6 +536,7 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
   esp_mqtt_client_handle_t client = esp_mqtt_client_init(&config);
   if (client == nullptr) {
     state.lastError = ESP_ERR_NO_MEM;
+    Serial.printf("[MO][%s] init failed: no memory\n", brokerName(broker));
     return false;
   }
 
@@ -456,6 +545,8 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
   if (rc != ESP_OK) {
     esp_mqtt_client_destroy(client);
     state.lastError = rc;
+    Serial.printf("[MO][%s] event registration failed rc=0x%x\n",
+                  brokerName(broker), static_cast<unsigned>(rc));
     return false;
   }
 
@@ -467,9 +558,13 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
   rc = esp_mqtt_client_start(client);
   if (rc != ESP_OK) {
     state.lastError = rc;
+    Serial.printf("[MO][%s] start failed rc=0x%x\n", brokerName(broker),
+                  static_cast<unsigned>(rc));
     destroyBroker(broker);
     return false;
   }
+  Serial.printf("[MO][%s] start requested t=%lu\n", brokerName(broker),
+                static_cast<unsigned long>(now));
   return true;
 }
 
@@ -484,11 +579,21 @@ void MOMQTT::destroyBroker(BrokerId broker) {
 
 void MOMQTT::scheduleRetry(BrokerId broker, uint32_t now) {
   BrokerRuntime& state = runtime(brokers_, broker);
+  // ESP-MQTT can emit ERROR and DISCONNECTED for the same failed attempt.
+  // Count and schedule that attempt only once.
+  if (state.reconnectPending) return;
   state.reconnectFailures =
       std::min<uint32_t>(state.reconnectFailures + 1, 31);
   state.reconnectPending = true;
   state.state = State::Backoff;
-  state.nextConnectAttemptMs = now + retryDelayMs(state.reconnectFailures);
+  const uint32_t delay = retryDelayMs(state.reconnectFailures);
+  state.nextConnectAttemptMs = now + delay;
+  Serial.printf(
+      "[MO][%s] backoff t=%lu retry_ms=%lu failures=%lu last_error=0x%x\n",
+      brokerName(broker), static_cast<unsigned long>(now),
+      static_cast<unsigned long>(delay),
+      static_cast<unsigned long>(state.reconnectFailures),
+      static_cast<unsigned>(state.lastError));
 }
 
 void MOMQTT::clearRuntime(BrokerId broker) {
@@ -497,6 +602,7 @@ void MOMQTT::clearRuntime(BrokerId broker) {
   state.started = false;
   state.reconnectPending = false;
   state.nextConnectAttemptMs = 0;
+  state.connectedSinceMs = 0;
 }
 
 bool MOMQTT::hasConnectHeadroom(BrokerId broker) const {
@@ -518,6 +624,14 @@ bool MOMQTT::hasConnectHeadroom(BrokerId broker) const {
 
 bool MOMQTT::isWiFiReady() const {
   return wifi_.connected();
+}
+
+bool MOMQTT::isNetworkReady() const {
+  return wifi_.connected() && wifi_.hasTimeSync();
+}
+
+MOMQTT::State MOMQTT::networkWaitState() const {
+  return wifi_.connected() ? State::WaitingForTime : State::WaitingForWiFi;
 }
 
 bool MOMQTT::buildClientConfig(BrokerId broker,
@@ -824,4 +938,8 @@ uint32_t MOMQTT::retryDelayMs(uint32_t failures) noexcept {
   const uint64_t delay = static_cast<uint64_t>(kRetryBaseMs) << shift;
   return static_cast<uint32_t>(
       std::min<uint64_t>(delay, kRetryMaxMs));
+}
+
+const char* MOMQTT::brokerName(BrokerId broker) noexcept {
+  return broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2";
 }
