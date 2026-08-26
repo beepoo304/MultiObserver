@@ -4,7 +4,6 @@
 #include <SPIFFS.h>
 
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstring>
 #include <vector>
@@ -130,18 +129,31 @@ bool MOEtap2Prefs::appendLog(std::string_view day, std::string_view entry) const
   if (day.empty() || entry.empty() || day.find('\n') != std::string_view::npos ||
       entry.find('\n') != std::string_view::npos) return false;
 
-  std::string existing;
+  const std::string header = "D " + std::string(day) + "\n";
+  bool currentDay = false;
   if (SPIFFS.exists(kLogFilename)) {
     File in = SPIFFS.open(kLogFilename, "r");
     if (!in) return false;
-    existing.reserve(in.size());
-    while (in.available()) existing.push_back(static_cast<char>(in.read()));
+    std::string savedHeader;
+    while (in.available()) {
+      const char value = static_cast<char>(in.read());
+      savedHeader.push_back(value);
+      if (value == '\n' || savedHeader.size() >= header.size()) break;
+    }
     in.close();
+    currentDay = savedHeader == header;
   }
-  const std::string header = "D " + std::string(day) + "\n";
-  if (existing.rfind(header, 0) != 0) existing = header;
-  existing += std::string(entry) + "\n";
-  return writeExact(kLogFilename, existing.data(), existing.size());
+
+  if (!currentDay) {
+    if (!writeExact(kLogFilename, header.data(), header.size())) return false;
+  }
+  File out = SPIFFS.open(kLogFilename, "a", true);
+  if (!out) return false;
+  const bool ok = out.write(reinterpret_cast<const uint8_t*>(entry.data()),
+                            entry.size()) == entry.size() &&
+                  out.write(static_cast<uint8_t>('\n')) == 1;
+  out.close();
+  return ok;
 }
 
 bool MOEtap2Prefs::readLastLogLines(std::string_view day, size_t maxLines,

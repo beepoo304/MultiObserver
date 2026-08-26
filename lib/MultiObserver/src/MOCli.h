@@ -56,9 +56,7 @@ class MOCli {
   static bool copyReply(char* reply, std::string_view text) noexcept;
   static bool startsWith(std::string_view value, std::string_view prefix) noexcept;
   static std::string_view trim(std::string_view value) noexcept;
-  static std::string_view mqttName(MOMQTT::BrokerId broker) noexcept;
   static std::string_view stateName(MOMQTT::State state) noexcept;
-  static std::string_view transportName(MOTransport transport) noexcept;
 
   MOConfig& config_;
   MOWifi& wifi_;

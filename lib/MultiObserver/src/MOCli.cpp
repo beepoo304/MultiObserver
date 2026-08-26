@@ -11,18 +11,6 @@ namespace {
 
 constexpr size_t kMaxCommandLength = 159;
 
-std::string_view afterFirstSpace(std::string_view value) {
-  const size_t pos = value.find(' ');
-  if (pos == std::string_view::npos) {
-    return {};
-  }
-  return value.substr(pos + 1);
-}
-
-bool equals(std::string_view lhs, std::string_view rhs) {
-  return lhs == rhs;
-}
-
 }  // namespace
 
 MOCli::MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt,
@@ -551,10 +539,6 @@ std::string_view MOCli::trim(std::string_view value) noexcept {
   return value;
 }
 
-std::string_view MOCli::mqttName(MOMQTT::BrokerId broker) noexcept {
-  return broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1" : "mqtt2";
-}
-
 std::string_view MOCli::stateName(MOMQTT::State state) noexcept {
   switch (state) {
     case MOMQTT::State::Disabled:
@@ -575,8 +559,4 @@ std::string_view MOCli::stateName(MOMQTT::State state) noexcept {
       return "ERROR";
   }
   return "UNKNOWN";
-}
-
-std::string_view MOCli::transportName(MOTransport transport) noexcept {
-  return transport == MOTransport::Wss ? "wss" : "tcp";
 }

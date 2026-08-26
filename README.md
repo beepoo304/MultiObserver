@@ -375,6 +375,47 @@ grace period, WDG enters silent mode and checks every 15 minutes without
 further restarts or reboot loops. A `*.restore` alert is sent only after
 recovery from silent mode; its duration starts at entry into silent mode.
 
+#### WDG escalation sequence
+
+WDG always gives Wi-Fi priority. If Wi-Fi is down, MQTT1 and MQTT2 are treated
+as dependent services and their independent escalation timers do not run.
+Every successful recovery clears that service's current escalation state.
+
+Wi-Fi is checked every 5 seconds:
+
+| Consecutive stage | Action if Wi-Fi is still down |
+| --- | --- |
+| Monitor for 3 minutes | Call the existing MultiObserver Wi-Fi restart. |
+| Monitor for another 5 minutes | Restart Wi-Fi a second time. |
+| Monitor for another 30 minutes | Queue `Restart.ESP.wifi.down`. |
+| Wait another 3 minutes | Persist the one-shot WDG marker and reboot the ESP once. |
+
+Each enabled and correctly configured MQTT broker is checked every 15 seconds
+while Wi-Fi is healthy. MQTT1 and MQTT2 have separate state machines:
+
+| Consecutive stage | Action if that MQTT broker is still unhealthy |
+| --- | --- |
+| Monitor for 3 minutes | Restart that MQTT client. |
+| Monitor for another 5 minutes | Restart that MQTT client again. |
+| Monitor for another 15 minutes | Restart that MQTT client a third time. |
+| Monitor for another 30 minutes | Queue `Restart.ESP.mqtt1.down` or `Restart.ESP.mqtt2.down`. |
+| Wait another 3 minutes | Persist the one-shot WDG marker and reboot the ESP once. |
+
+Only one reboot can be pending globally. Disabling WDG or running
+`restart.wdg` cancels a pending reboot and clears all escalation states;
+`restart.wdg` then starts a new grace period without rebooting the ESP.
+A successful recovery during the final three-minute delay also cancels the
+pending reboot owned by that service.
+
+On boot, WDG consumes and deletes its reboot marker immediately. After grace,
+`AlertChannel newStart` is queued. If a supervised service is still down and
+that consumed marker identified this as the WDG-requested reboot, WDG enters
+silent mode. Silent mode performs no service restart and schedules no further
+ESP reboot. It checks every 15 minutes. Once a failed service recovers, AC
+queues `wifi.restore`, `mqtt1.restore` or `mqtt2.restore` with a duration
+measured only from entry into silent mode. Normal/manual boot and power loss do
+not activate silent mode.
+
 ### Private AlertChannel
 
 Create a private channel in a MeshCore client and copy its secret key. Standard
@@ -396,6 +437,27 @@ with repeater time. Alert messages are encrypted as MeshCore group datagrams
 and handed directly to the repeater's existing scoped outbound queue.
 MultiObserver does not maintain a second queue, retry alerts, wait for ACKs or
 control the radio directly.
+
+#### How AlertChannel works
+
+1. `set channel.key` validates and persistently stores a 128-bit or 256-bit
+   MeshCore private-channel secret. The key is never printed in serial logs.
+2. `set channel.on` enables delivery. A missing/invalid key, disabled channel
+   or unavailable MeshCore sender makes an alert fail immediately and produces
+   only a short diagnostic; the watchdog itself never blocks.
+3. AC adds the repeater-clock date and time and limits the complete alert text
+   to 130 characters.
+4. The thin `MOBridge` passes the decoded key and text to `MyMesh`.
+5. `MyMesh` calculates the standard channel hash and calls MeshCore's
+   `createGroupDatagram(PAYLOAD_TYPE_GRP_TXT, ...)`.
+6. The encrypted packet is submitted with `sendFloodScoped(...)`, so ordering,
+   airtime and actual transmission remain owned by MeshCore's normal outbound
+   dispatcher.
+
+AC intentionally does not know whether the radio later transmitted the packet.
+There is no AC retry, delivery ACK or parallel queue. This prevents an alert
+failure from creating a second watchdog/reboot loop and keeps MultiObserver a
+thin application layer over MeshCore.
 
 ## EastMesh mechanism reference
 

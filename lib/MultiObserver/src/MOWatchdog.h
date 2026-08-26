@@ -25,7 +25,15 @@ class MOWatchdog {
 
  private:
   enum class Phase : uint8_t { Grace, Normal, Silent };
-  enum class OutageStage : uint8_t { None, First, Second, Third, Alerted };
+  enum class OutageStage : uint8_t {
+    None,
+    First,
+    Second,
+    Third,
+    Alerted,
+    RebootPending,
+  };
+  enum class Service : uint8_t { None, Wifi, Mqtt1, Mqtt2 };
 
   struct ServiceTrack {
     bool down{false};
@@ -56,7 +64,8 @@ class MOWatchdog {
   void handleMqttDown(MOMQTT::BrokerId broker, ServiceTrack& track,
                       uint32_t now);
   void clearTrack(ServiceTrack& track) noexcept;
-  void scheduleReboot(const char* reason, uint32_t now);
+  void scheduleReboot(Service service, uint32_t now);
+  void cancelReboot(Service service);
   void sendAlert(const char* text);
   void logEvent(const char* event) const;
   bool mqttSupervised(MOMQTT::BrokerId broker) const noexcept;
@@ -66,6 +75,7 @@ class MOWatchdog {
   static void durationText(uint32_t milliseconds, char* output,
                            size_t outputSize) noexcept;
   static const char* phaseName(Phase phase) noexcept;
+  static const char* serviceName(Service service) noexcept;
 
   MOEtap2Prefs& prefs_;
   MOWifi& wifi_;
@@ -75,6 +85,7 @@ class MOWatchdog {
   Phase phase_{Phase::Grace};
   bool bootAfterWatchdog_{false};
   bool rebootScheduled_{false};
+  Service rebootService_{Service::None};
   bool silentWifi_{false};
   bool silentMqtt1_{false};
   bool silentMqtt2_{false};
