@@ -33,7 +33,7 @@ Target integration:
 ## Repository layout
 
 ```text
-MO/
+MultiObserver/
 ├── examples/
 │   └── simple_repeater/
 │       ├── MOBridge.cpp
@@ -104,17 +104,72 @@ The installer never keeps a prepared device identity in the MO source tree.
 When identity arguments are supplied, it writes the generated identity and
 name directly into the selected MeshCore target's `data/` directory.
 
-## Installation
+## Quick start (Windows / Heltec V3)
 
-On Windows, run `Run-Installer.cmd` and provide the clean MeshCore source path,
-repeater name and identity keys when prompted. The wrapper runs installation
-and verification consecutively.
+### Prerequisites
 
-For scripted use:
+- A clean MeshCore repeater source tree. MeshCore **1.15.0**, **1.16.0** and
+  **1.17.1** have been installed and compiled successfully with this release.
+- Python 3 and PlatformIO (`py -3 -m platformio`).
+- A USB-connected Heltec V3 board when you are ready to flash it.
+
+### 1. Apply MultiObserver to MeshCore
+
+From the `MultiObserver` directory, run:
 
 ```powershell
-python installer/install.py <MeshCore-path> --source-root <MO-path>
+.\Run-Installer.cmd
+```
+
+Enter the path to the clean MeshCore source tree, the repeater name, and the
+public/private identity keys when prompted. The installer creates a rollback
+backup, adds the minimal application/build hooks, prepares the MeshCore
+filesystem data (`data/identity/_main.id` and `data/prefs.json`), and verifies
+the resulting tree.
+
+For non-interactive or troubleshooting use:
+
+```powershell
+python installer/install.py <MeshCore-path> --source-root <MultiObserver-path>
 python installer/verify.py <MeshCore-path>
+```
+
+### 2. Build the prepared MeshCore tree
+
+Change to the **MeshCore tree selected in step 1**, then build the Heltec V3
+repeater firmware:
+
+```powershell
+py -3 -m platformio run -e Heltec_v3_repeater
+```
+
+### 3. Flash firmware and configuration
+
+After the first installation, or after an erase, upload both the firmware and
+the prepared filesystem. Run these commands from the prepared MeshCore tree:
+
+```powershell
+py -3 -m platformio run -e Heltec_v3_repeater -t upload
+py -3 -m platformio run -e Heltec_v3_repeater -t uploadfs
+```
+
+To completely erase the connected board first:
+
+```powershell
+py -3 -m platformio run -e Heltec_v3_repeater -t erase
+```
+
+`upload` flashes the program. `uploadfs` writes the identity, repeater name
+and persistent configuration prepared by the installer; it is therefore also
+required after an erase. Do not publish identity keys, Wi-Fi passwords or MQTT
+credentials in a public repository.
+
+### 4. Open the serial monitor
+
+The serial monitor uses 115200 baud:
+
+```powershell
+py -3 -m platformio device monitor -b 115200
 ```
 
 ## EastMesh mechanism reference
