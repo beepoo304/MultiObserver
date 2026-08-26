@@ -1,14 +1,49 @@
 # MultiObserver
 
-MultiObserver is an open-source Observer extension for MeshCore 1.17.1.
+MultiObserver is an open-source observer extension for **MeshCore Repeater**.
+It is designed as a reusable, application-level library that adds Wi-Fi and
+dual-broker MQTT observation to a MeshCore repeater without replacing or
+forking MeshCore core functionality.
 
-The project is designed as a small application-level extension rather than a
-replacement for MeshCore core functionality.
+The observer receives repeater traffic, publishes packet and status telemetry
+to up to two independently configured MQTT brokers, and exposes persistent
+network configuration through the standard MeshCore CLI. It supports secure
+MQTT-over-WebSocket connections (WSS/TLS), making it suitable for community or
+private telemetry backends.
+
+## Compatibility
+
+MultiObserver is installed into a clean MeshCore repeater source tree and has
+been validated with the `Heltec_v3_repeater` environment for:
+
+| MeshCore Repeater release | Status |
+| --- | --- |
+| 1.15.0 | Installer verified and firmware builds successfully |
+| 1.16.0 | Installer verified and firmware builds successfully |
+| 1.17.1 | Installer verified and firmware builds successfully |
+
+The integration deliberately keeps MeshCore core code intact. The installer
+adds only the minimal build and application hooks; `MOBridge` is the thin
+adapter between the repeater application and the MultiObserver library.
+
+## What MultiObserver provides
+
+- **Two independent MQTT broker profiles** with separate host, port,
+  transport, username, password and enable/disable settings.
+- **Wi-Fi and MQTT configuration through the MeshCore CLI**, stored persistently
+  on the device.
+- **MQTT over TCP or WSS/TLS**, with connection startup gated on usable Wi-Fi
+  and valid system time.
+- Packet, RAW and periodic status publication to every enabled broker.
+- Serial diagnostics for Wi-Fi, SNTP, MQTT state changes and received/transmitted
+  packets.
+- Heltec V3 integration: Wi-Fi IP shown on the OLED, an EastMesh-style cached
+  battery measurement, and a non-blocking white LED pulse for packet activity.
 
 ## Current status
 
-The V1 implementation is active and builds successfully for MeshCore 1.17.1
-`Heltec_v3_repeater`.
+The V1 implementation is active and builds successfully for the supported
+MeshCore Repeater releases listed above.
 
 Implemented runtime mechanisms include:
 
@@ -22,7 +57,7 @@ Implemented runtime mechanisms include:
 - non-blocking visible packet pulse on the Heltec V3 white GPIO35 LED
 - WiFi IP address on the Heltec OLED status screen
 
-Target integration:
+Integration architecture:
 
 - MeshCore 1.17.1 core remains unchanged in `src/`
 - repeater integration lives in `examples/simple_repeater/`
