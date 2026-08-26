@@ -35,6 +35,8 @@ class MOMQTT {
     State state{State::Disabled};
     uint32_t reconnectFailures{0};
     esp_err_t lastError{ESP_OK};
+    uint32_t lastPublishQueuedMs{0};
+    uint32_t lastPublishConfirmedMs{0};
   };
 
   struct PacketData {
@@ -102,6 +104,7 @@ class MOMQTT {
 
   [[nodiscard]] BrokerStatus status(BrokerId broker) const noexcept;
   [[nodiscard]] bool connected(BrokerId broker) const noexcept;
+  [[nodiscard]] bool configured(BrokerId broker) const noexcept;
 
   void setObserverIdentity(std::string_view originId);
 
@@ -136,6 +139,8 @@ class MOMQTT {
     bool reconnectPending{false};
     bool forcedEnabled{false};
     uint32_t connectedSinceMs{0};
+    uint32_t lastPublishQueuedMs{0};
+    uint32_t lastPublishConfirmedMs{0};
   };
 
   static void onMqttEvent(void* handlerArg, esp_event_base_t eventBase,

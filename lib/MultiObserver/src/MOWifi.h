@@ -26,6 +26,9 @@ class MOWifi {
   void restart();
 
   [[nodiscard]] bool connected() const noexcept;
+  // Link health intentionally remains local: the watchdog must not create
+  // external traffic merely to decide whether Wi-Fi is usable.
+  [[nodiscard]] bool healthy() const noexcept;
   [[nodiscard]] bool hasTimeSync() const noexcept;
   [[nodiscard]] State state() const noexcept;
   void formatStatus(char* buffer, size_t bufferSize) const noexcept;

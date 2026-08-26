@@ -197,11 +197,17 @@ MOMQTT::BrokerStatus MOMQTT::status(BrokerId broker) const noexcept {
   const BrokerRuntime& state = runtime(brokers_, broker);
   return {.state = state.state,
           .reconnectFailures = state.reconnectFailures,
-          .lastError = state.lastError};
+          .lastError = state.lastError,
+          .lastPublishQueuedMs = state.lastPublishQueuedMs,
+          .lastPublishConfirmedMs = state.lastPublishConfirmedMs};
 }
 
 bool MOMQTT::connected(BrokerId broker) const noexcept {
   return runtime(brokers_, broker).state == State::Connected;
+}
+
+bool MOMQTT::configured(BrokerId broker) const noexcept {
+  return isEnabled(prefs(prefs_, broker));
 }
 
 void MOMQTT::setObserverIdentity(std::string_view originId) {
@@ -321,7 +327,7 @@ bool MOMQTT::publishStoredStatus(bool online) {
 
 bool MOMQTT::queuePublish(BrokerId broker, std::string_view topic,
                           std::string_view payload, bool retain) {
-  const BrokerRuntime& state = runtime(brokers_, broker);
+  BrokerRuntime& state = runtime(brokers_, broker);
   if (state.client == nullptr || state.state != State::Connected ||
       topic.empty() || payload.empty()) return false;
 
@@ -330,7 +336,11 @@ bool MOMQTT::queuePublish(BrokerId broker, std::string_view topic,
   const int rc = esp_mqtt_client_enqueue(
       state.client, topicCopy.c_str(), payloadCopy.c_str(), 0, 1,
       retain ? 1 : 0, true);
-  return rc >= 0;
+  if (rc >= 0) {
+    state.lastPublishQueuedMs = millis();
+    return true;
+  }
+  return false;
 }
 
 void MOMQTT::onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
@@ -375,6 +385,9 @@ void MOMQTT::handleMqttEvent(BrokerId broker,
         publishStoredStatus(true);
         lastStatusPublishMs_ = millis();
       }
+      break;
+    case MQTT_EVENT_PUBLISHED:
+      state.lastPublishConfirmedMs = now;
       break;
     case MQTT_EVENT_DISCONNECTED:
       Serial.printf(
@@ -603,6 +616,8 @@ void MOMQTT::clearRuntime(BrokerId broker) {
   state.reconnectPending = false;
   state.nextConnectAttemptMs = 0;
   state.connectedSinceMs = 0;
+  state.lastPublishQueuedMs = 0;
+  state.lastPublishConfirmedMs = 0;
 }
 
 bool MOMQTT::hasConnectHeadroom(BrokerId broker) const {

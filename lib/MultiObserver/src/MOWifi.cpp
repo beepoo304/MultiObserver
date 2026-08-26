@@ -125,6 +125,17 @@ bool MOWifi::connected() const noexcept {
   return state_ == State::Connected && WiFi.status() == WL_CONNECTED;
 }
 
+bool MOWifi::healthy() const noexcept {
+  if (!connected()) {
+    return false;
+  }
+
+  const IPAddress localIp = WiFi.localIP();
+  const IPAddress gateway = WiFi.gatewayIP();
+  return localIp != IPAddress(0, 0, 0, 0) &&
+         gateway != IPAddress(0, 0, 0, 0);
+}
+
 bool MOWifi::hasTimeSync() const noexcept {
   return connected() && timeSynced_;
 }
