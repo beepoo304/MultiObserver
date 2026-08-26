@@ -29,11 +29,16 @@ line numbers or version-specific source offsets.
 
 ## MeshCore files modified by the installer
 
-Only these three files are patched:
+Only these application files are patched:
 
 - `examples/simple_repeater/main.cpp`
 - `examples/simple_repeater/MyMesh.h`
 - `examples/simple_repeater/MyMesh.cpp`
+- `examples/simple_repeater/UITask.cpp`
+
+The build configuration is updated only in:
+
+- `variants/heltec_v3/platformio.ini`
 
 The MeshCore `src/` tree is not modified.
 
@@ -42,12 +47,16 @@ MultiObserver itself is copied into:
 - `lib/MultiObserver/`
 - `examples/simple_repeater/MOBridge.h`
 - `examples/simple_repeater/MOBridge.cpp`
+- `scripts/multiobserver_cpp17.py`
 
 ## Safety
 
 - `--dry-run` performs validation without writing.
-- Installation creates a timestamped backup of the three patched MeshCore files.
+- Installation creates a timestamped backup of every patched MeshCore file and
+  the Heltec build configuration.
 - Installation failure triggers automatic rollback.
 - Existing complete installation is idempotent.
 - Partial marker state is rejected rather than guessed.
 - Ambiguous or missing integration anchors abort installation.
+- Prepared identities are written only to the selected target tree and are
+  never retained in the MO repository.

@@ -2,7 +2,6 @@
 .pio/
 .piolibdeps/
 .pioenvs/
-.pio/
 firmware/
 *.elf
 *.map
@@ -43,3 +42,4 @@ env/
 secrets/
 credentials/
 config.local.*
+installer/prepared_fs/
