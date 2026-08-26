@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from installer.mo_installer.common import InstallError
-from installer.mo_installer.patches import patch_platformio
+from installer.mo_installer.patches import patch_alert_channel_bridge, patch_platformio
 
 
 TARGET = "[env:Heltec_v3_repeater]"
@@ -64,6 +64,40 @@ class PlatformioPatchTests(unittest.TestCase):
         )
         with self.assertRaises(InstallError):
             patch_platformio(malformed)
+
+
+class AlertBridgePatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.header = """class MyMesh {
+public:
+  const char* getNodeName() { return _prefs.node_name; }
+};
+"""
+        self.source = """#include \"MyMesh.h\"
+MOBridge mo_bridge;
+
+void MyMesh::begin(FILESYSTEM *fs) {
+  mesh::Mesh::begin();
+}
+"""
+
+    def test_uses_meshcore_native_outbound_path(self) -> None:
+        header, source = patch_alert_channel_bridge(self.header, self.source)
+        self.assertIn("enqueueMultiObserverAlert", header)
+        self.assertIn("createGroupDatagram(", source)
+        self.assertIn("sendFloodScoped(default_scope, packet", source)
+        self.assertNotIn("alertQueue", source)
+        self.assertNotIn("retryAlert", source)
+
+    def test_is_idempotent(self) -> None:
+        once_header, once_source = patch_alert_channel_bridge(
+            self.header, self.source
+        )
+        twice_header, twice_source = patch_alert_channel_bridge(
+            once_header, once_source
+        )
+        self.assertEqual(twice_header, once_header)
+        self.assertEqual(twice_source, once_source)
 
 
 if __name__ == "__main__":

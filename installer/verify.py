@@ -182,6 +182,14 @@ def main() -> int:
         and "mo_bridge.setAlertSender(&moEnqueueAlert, this);" in mymesh_cpp,
         "no MultiObserver alert queue": "alertQueue" not in mymesh_cpp
         and "retryAlert" not in mymesh_cpp,
+        "watchdog CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
+            "get wdg.status", "wdg.on", "wdg.off", "get wdg.grace",
+            "wdg.grace", "restart.wdg", "get wdg.log", "wdg.log",
+        )),
+        "alert channel CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
+            "get channel.status", "channel.on", "channel.off",
+            "get channel.key", "channel.key", "test.channel",
+        )),
         "MOMQTT status": "publishStatus" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "MOMQTT LWT": "last_will" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "RAW publish": "mqtt_.publishRaw(raw)" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),

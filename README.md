@@ -39,10 +39,14 @@ adapter between the repeater application and the MultiObserver library.
   packets.
 - Heltec V3 integration: Wi-Fi IP shown on the OLED, an EastMesh-style cached
   battery measurement, and a non-blocking white LED pulse for packet activity.
+- A staged Wi-Fi/MQTT watchdog with a configurable startup grace period,
+  bounded recovery actions and loop-safe post-reboot silent monitoring.
+- An encrypted private AlertChannel that uses MeshCore's native outbound queue
+  for startup, outage and recovery notifications.
 
 ## Current status
 
-The V1 implementation is active and builds successfully for the supported
+The V2 implementation is active and builds successfully for the supported
 MeshCore Repeater releases listed above.
 
 Implemented runtime mechanisms include:
@@ -56,6 +60,9 @@ Implemented runtime mechanisms include:
 - EastMesh-style 60-second battery sampling cache for Heltec V3 GPIO37
 - non-blocking visible packet pulse on the Heltec V3 white GPIO35 LED
 - WiFi IP address on the Heltec OLED status screen
+- staged Wi-Fi, MQTT1 and MQTT2 supervision with one-shot reboot attribution
+- a current-day watchdog event log with the last five entries available by CLI
+- 128-bit and 256-bit private MeshCore AlertChannel keys
 
 Integration architecture:
 
@@ -102,7 +109,13 @@ MultiObserver/
 │           ├── MOMQTTPrefs.cpp
 │           ├── MOMQTTPrefs.h
 │           ├── MOCli.cpp
-│           └── MOCli.h
+│           ├── MOCli.h
+│           ├── MOEtap2Prefs.cpp
+│           ├── MOEtap2Prefs.h
+│           ├── MOAlertChannel.cpp
+│           ├── MOAlertChannel.h
+│           ├── MOWatchdog.cpp
+│           └── MOWatchdog.h
 ├── install.ps1
 └── Run-Installer.cmd
 ```
@@ -333,6 +346,56 @@ Broker 2 uses the same commands as broker 1. Replace `mqtt1` with `mqtt2`:
 
 For example, use `set mqtt.iata KTW` for Katowice. The code must contain
 exactly three uppercase letters.
+
+### Watchdog
+
+The watchdog starts after a configurable 120-300 second grace period. Wi-Fi
+health requires a connected station, a non-zero local address and a non-zero
+default gateway; no Internet probe is generated. Enabled, fully configured
+MQTT brokers are supervised only while Wi-Fi is healthy. MQTT health requires
+both an active session and fresh acknowledgement of a periodic status publish.
+
+| Command | Description |
+| --- | --- |
+| `get wdg.status` | Show WDG mode, phase, service health and pending reboot state. |
+| `set wdg.on` | Enable WDG persistently and start a fresh grace period. |
+| `set wdg.off` | Disable WDG, cancel escalation and cancel a pending WDG reboot. |
+| `get wdg.grace` | Show the saved startup grace period in seconds. |
+| `set wdg.grace <120-300>` | Save the grace period and restart WDG grace. |
+| `restart.wdg` | Reset only the WDG state machine and grace timer; do not reboot the ESP. |
+| `get wdg.log` | Return the last five short events from the current repeater-clock day. |
+| `set wdg.log 1` | Clear the WDG event log. |
+
+Wi-Fi recovery escalates after 3, 5 and 30 minutes. MQTT1 and MQTT2 are
+supervised independently and escalate after 3, 5, 15 and 30 minutes. The last
+stage queues an encrypted alert and schedules one ESP reboot three minutes
+later. A persistent one-shot marker distinguishes that reboot from manual
+restart or power loss. If the failed service is still down after the next
+grace period, WDG enters silent mode and checks every 15 minutes without
+further restarts or reboot loops. A `*.restore` alert is sent only after
+recovery from silent mode; its duration starts at entry into silent mode.
+
+### Private AlertChannel
+
+Create a private channel in a MeshCore client and copy its secret key. Standard
+MeshCore private channels normally expose a 32-hex-character (128-bit) key;
+64-hex-character (256-bit) keys are accepted as well. Treat this key as a
+secret. MultiObserver never publishes it to serial diagnostics.
+
+| Command | Description |
+| --- | --- |
+| `get channel.status` | Show whether AlertChannel is off, ready or missing a key/sender. |
+| `set channel.on` | Enable AlertChannel persistently. |
+| `set channel.off` | Disable AlertChannel persistently. |
+| `get channel.key` | Return the saved channel key over the authenticated MeshCore CLI. |
+| `set channel.key <32-or-64-hex>` | Save a private MeshCore channel key. |
+| `test.channel` | Queue `test alertchannel`, time and concise WDG state (maximum 130 characters). |
+
+After each grace period AlertChannel attempts to queue `AlertChannel newStart`
+with repeater time. Alert messages are encrypted as MeshCore group datagrams
+and handed directly to the repeater's existing scoped outbound queue.
+MultiObserver does not maintain a second queue, retry alerts, wait for ACKs or
+control the radio directly.
 
 ## EastMesh mechanism reference
 
