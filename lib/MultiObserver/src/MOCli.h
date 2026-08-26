@@ -2,6 +2,8 @@
 
 #include "MOConfig.h"
 #include "MOMQTT.h"
+#include "MOAlertChannel.h"
+#include "MOWatchdog.h"
 #include "MOWifi.h"
 
 #include <cstddef>
@@ -12,7 +14,8 @@ class MOCli {
  public:
   static constexpr size_t kReplyCapacity = 160;
 
-  MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt);
+  MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt,
+        MOAlertChannel& channel, MOWatchdog& watchdog);
 
   MOCli(const MOCli&) = delete;
   MOCli& operator=(const MOCli&) = delete;
@@ -24,6 +27,8 @@ class MOCli {
   bool handleWifi(std::string_view command, char* reply) noexcept;
   bool handleMqtt(std::string_view command, char* reply) noexcept;
   bool handleCustom(std::string_view command, char* reply) noexcept;
+  bool handleWatchdog(std::string_view command, char* reply) noexcept;
+  bool handleChannel(std::string_view command, char* reply) noexcept;
 
   bool setWifiSsid(std::string_view value, char* reply) noexcept;
   bool setWifiPassword(std::string_view value, char* reply) noexcept;
@@ -58,4 +63,6 @@ class MOCli {
   MOConfig& config_;
   MOWifi& wifi_;
   MOMQTT& mqtt_;
+  MOAlertChannel& channel_;
+  MOWatchdog& watchdog_;
 };

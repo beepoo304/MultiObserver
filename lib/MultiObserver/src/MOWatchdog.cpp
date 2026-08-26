@@ -19,6 +19,20 @@ void MOWatchdog::begin() {
 void MOWatchdog::loop() {
   if (!prefs_.watchdogEnabled()) return;
   const uint32_t now = millis();
+  if (elapsed(now, nextLogRotationCheckMs_)) {
+    nextLogRotationCheckMs_ = now + 1'000;
+    const time_t clock = time(nullptr);
+    struct tm utc{};
+    if (clock >= 1735689600 && gmtime_r(&clock, &utc) != nullptr) {
+      const int32_t dayId = (utc.tm_year * 366) + utc.tm_yday;
+      if (dayId != logDayId_) {
+        logDayId_ = dayId;
+        char day[12]{}; std::strftime(day, sizeof(day), "%Y-%m-%d", &utc);
+        std::string ignored;
+        prefs_.readLastLogLines(day, 0, ignored);
+      }
+    }
+  }
   if (rebootScheduled_ && elapsed(now, rebootAtMs_)) {
     logEvent("reboot");
     if (prefs_.markWatchdogReboot()) {
@@ -54,6 +68,11 @@ void MOWatchdog::restartGrace() noexcept {
   nextWifiCheckMs_ = graceStartedMs_;
   nextMqttCheckMs_ = graceStartedMs_;
   nextSilentCheckMs_ = graceStartedMs_;
+  nextLogRotationCheckMs_ = graceStartedMs_;
+  logDayId_ = -1;
+  silentWifi_ = false;
+  silentMqtt1_ = false;
+  silentMqtt2_ = false;
   clearTrack(wifiTrack_);
   clearTrack(mqtt1Track_);
   clearTrack(mqtt2Track_);
@@ -78,9 +97,14 @@ void MOWatchdog::finishGrace(uint32_t now) {
   if (bootAfterWatchdog_ && anyServiceDown()) {
     phase_ = Phase::Silent;
     nextSilentCheckMs_ = now;
-    wifiTrack_.silentSinceMs = now;
-    mqtt1Track_.silentSinceMs = now;
-    mqtt2Track_.silentSinceMs = now;
+    silentWifi_ = !wifi_.healthy();
+    silentMqtt1_ = !silentWifi_ && mqttSupervised(MOMQTT::BrokerId::Mqtt1) &&
+                   !mqttHealthy(MOMQTT::BrokerId::Mqtt1);
+    silentMqtt2_ = !silentWifi_ && mqttSupervised(MOMQTT::BrokerId::Mqtt2) &&
+                   !mqttHealthy(MOMQTT::BrokerId::Mqtt2);
+    wifiTrack_.silentSinceMs = silentWifi_ ? now : 0;
+    mqtt1Track_.silentSinceMs = silentMqtt1_ ? now : 0;
+    mqtt2Track_.silentSinceMs = silentMqtt2_ ? now : 0;
     logEvent("silent_start");
     return;
   }
@@ -104,20 +128,41 @@ void MOWatchdog::runNormal(uint32_t now) {
 
 void MOWatchdog::runSilent(uint32_t now) {
   nextSilentCheckMs_ = now + kSilentCheckMs;
-  if (anyServiceDown()) return;
-
-  char duration[20]{};
-  const uint32_t started = wifiTrack_.silentSinceMs != 0
-                               ? wifiTrack_.silentSinceMs
-                               : now;
-  durationText(now - started, duration, sizeof(duration));
-  if (!wifi_.healthy()) {
-    sendAlert("wifi.restore");
+  if (silentWifi_) {
+    if (!wifi_.healthy()) return;
+    char duration[20]{}; char alert[64]{};
+    durationText(now - wifiTrack_.silentSinceMs, duration, sizeof(duration));
+    std::snprintf(alert, sizeof(alert), "wifi.restore duration=%s", duration);
+    sendAlert(alert); logEvent("wifi.restore"); silentWifi_ = false;
+    // MQTT supervision resumes only after Wi-Fi itself has recovered.
+    silentMqtt1_ = mqttSupervised(MOMQTT::BrokerId::Mqtt1) &&
+                   !mqttHealthy(MOMQTT::BrokerId::Mqtt1);
+    silentMqtt2_ = mqttSupervised(MOMQTT::BrokerId::Mqtt2) &&
+                   !mqttHealthy(MOMQTT::BrokerId::Mqtt2);
+    mqtt1Track_.silentSinceMs = silentMqtt1_ ? now : 0;
+    mqtt2Track_.silentSinceMs = silentMqtt2_ ? now : 0;
   }
-  char alert[96]{};
-  std::snprintf(alert, sizeof(alert), "services.restore silent=%s", duration);
-  sendAlert(alert);
-  logEvent("silent_restore");
+  if (silentMqtt1_ && mqttHealthy(MOMQTT::BrokerId::Mqtt1)) {
+    char duration[20]{}; char alert[64]{};
+    durationText(now - mqtt1Track_.silentSinceMs, duration, sizeof(duration));
+    std::snprintf(alert, sizeof(alert), "mqtt1.restore duration=%s", duration);
+    sendAlert(alert); logEvent("mqtt1.restore"); silentMqtt1_ = false;
+  }
+  if (silentMqtt1_ && !mqttSupervised(MOMQTT::BrokerId::Mqtt1)) {
+    logEvent("mqtt1.off"); silentMqtt1_ = false;
+  }
+  if (silentMqtt2_ && mqttHealthy(MOMQTT::BrokerId::Mqtt2)) {
+    char duration[20]{}; char alert[64]{};
+    durationText(now - mqtt2Track_.silentSinceMs, duration, sizeof(duration));
+    std::snprintf(alert, sizeof(alert), "mqtt2.restore duration=%s", duration);
+    sendAlert(alert); logEvent("mqtt2.restore"); silentMqtt2_ = false;
+  }
+  if (silentMqtt2_ && !mqttSupervised(MOMQTT::BrokerId::Mqtt2)) {
+    logEvent("mqtt2.off"); silentMqtt2_ = false;
+  }
+  if (silentWifi_ || silentMqtt1_ || silentMqtt2_) return;
+
+  logEvent("silent.done");
   bootAfterWatchdog_ = false;
   phase_ = Phase::Normal;
   clearTrack(wifiTrack_);
@@ -147,12 +192,12 @@ void MOWatchdog::handleWifiDown(uint32_t now) {
   if (!elapsed(now, wifiTrack_.nextActionAtMs)) return;
   switch (wifiTrack_.stage) {
     case OutageStage::First:
-      wifi_.restart(); logEvent("wifi_restart_1");
+      wifi_.restart(); logEvent("wifi.r1");
       wifiTrack_.stage = OutageStage::Second;
       wifiTrack_.nextActionAtMs = now + kWifiSecondMs;
       break;
     case OutageStage::Second:
-      wifi_.restart(); logEvent("wifi_restart_2");
+      wifi_.restart(); logEvent("wifi.r2");
       wifiTrack_.stage = OutageStage::Third;
       wifiTrack_.nextActionAtMs = now + kWifiThirdMs;
       break;
@@ -189,12 +234,15 @@ void MOWatchdog::handleMqttDown(MOMQTT::BrokerId broker, ServiceTrack& track,
   switch (track.stage) {
     case OutageStage::First:
       mqtt_.restart(broker); track.stage = OutageStage::Second;
+      logEvent(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.r1" : "mqtt2.r1");
       track.nextActionAtMs = now + kMqttSecondMs; break;
     case OutageStage::Second:
       mqtt_.restart(broker); track.stage = OutageStage::Third;
+      logEvent(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.r2" : "mqtt2.r2");
       track.nextActionAtMs = now + kMqttThirdMs; break;
     case OutageStage::Third:
       mqtt_.restart(broker); track.stage = OutageStage::Alerted;
+      logEvent(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.r3" : "mqtt2.r3");
       track.nextActionAtMs = now + kMqttFourthMs; break;
     case OutageStage::Alerted:
       {
@@ -215,7 +263,7 @@ void MOWatchdog::scheduleReboot(const char* reason, uint32_t now) {
   rebootScheduled_ = true;
   rebootAtMs_ = now + kRebootDelayMs;
   char event[48]{};
-  std::snprintf(event, sizeof(event), "reboot_scheduled_%s", reason);
+  std::snprintf(event, sizeof(event), "reboot.%s", reason);
   logEvent(event);
 }
 
@@ -239,7 +287,7 @@ bool MOWatchdog::mqttSupervised(MOMQTT::BrokerId broker) const noexcept {
 }
 
 bool MOWatchdog::mqttHealthy(MOMQTT::BrokerId broker) const noexcept {
-  return mqtt_.connected(broker);
+  return mqtt_.publishingHealthy(broker);
 }
 
 bool MOWatchdog::anyServiceDown() const noexcept {
@@ -266,8 +314,10 @@ void MOWatchdog::formatStatus(char* output, size_t outputSize) const noexcept {
   std::snprintf(output, outputSize, "WDG %s %s wifi=%s mqtt1=%s mqtt2=%s reboot=%s",
                 prefs_.watchdogEnabled() ? "ON" : "OFF", phaseName(phase_),
                 wifi_.healthy() ? "UP" : "DOWN",
-                mqtt_.connected(MOMQTT::BrokerId::Mqtt1) ? "UP" : "DOWN",
-                mqtt_.connected(MOMQTT::BrokerId::Mqtt2) ? "UP" : "DOWN",
+                !mqtt_.configured(MOMQTT::BrokerId::Mqtt1) ? "OFF" :
+                    (mqtt_.publishingHealthy(MOMQTT::BrokerId::Mqtt1) ? "UP" : "DOWN"),
+                !mqtt_.configured(MOMQTT::BrokerId::Mqtt2) ? "OFF" :
+                    (mqtt_.publishingHealthy(MOMQTT::BrokerId::Mqtt2) ? "UP" : "DOWN"),
                 rebootScheduled_ ? "PENDING" : "NO");
 }
 

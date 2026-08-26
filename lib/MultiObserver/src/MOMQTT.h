@@ -37,6 +37,7 @@ class MOMQTT {
     esp_err_t lastError{ESP_OK};
     uint32_t lastPublishQueuedMs{0};
     uint32_t lastPublishConfirmedMs{0};
+    uint32_t connectedSinceMs{0};
   };
 
   struct PacketData {
@@ -105,6 +106,7 @@ class MOMQTT {
   [[nodiscard]] BrokerStatus status(BrokerId broker) const noexcept;
   [[nodiscard]] bool connected(BrokerId broker) const noexcept;
   [[nodiscard]] bool configured(BrokerId broker) const noexcept;
+  [[nodiscard]] bool publishingHealthy(BrokerId broker) const noexcept;
 
   void setObserverIdentity(std::string_view originId);
 

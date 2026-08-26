@@ -12,7 +12,7 @@ MO::MO()
     : mqtt_(config_.mqtt(), wifi_),
       alertChannel_(config_.etap2()),
       watchdog_(config_.etap2(), wifi_, mqtt_),
-      cli_(config_, wifi_, mqtt_) {}
+      cli_(config_, wifi_, mqtt_, alertChannel_, watchdog_) {}
 
 void MO::begin() {
   if (started_) {

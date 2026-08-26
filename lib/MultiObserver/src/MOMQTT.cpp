@@ -199,7 +199,8 @@ MOMQTT::BrokerStatus MOMQTT::status(BrokerId broker) const noexcept {
           .reconnectFailures = state.reconnectFailures,
           .lastError = state.lastError,
           .lastPublishQueuedMs = state.lastPublishQueuedMs,
-          .lastPublishConfirmedMs = state.lastPublishConfirmedMs};
+          .lastPublishConfirmedMs = state.lastPublishConfirmedMs,
+          .connectedSinceMs = state.connectedSinceMs};
 }
 
 bool MOMQTT::connected(BrokerId broker) const noexcept {
@@ -208,6 +209,18 @@ bool MOMQTT::connected(BrokerId broker) const noexcept {
 
 bool MOMQTT::configured(BrokerId broker) const noexcept {
   return isEnabled(prefs(prefs_, broker));
+}
+
+bool MOMQTT::publishingHealthy(BrokerId broker) const noexcept {
+  const BrokerRuntime& state = runtime(brokers_, broker);
+  if (state.state != State::Connected || state.connectedSinceMs == 0) return false;
+  const uint32_t now = millis();
+  if (state.lastPublishConfirmedMs == 0) {
+    // The first retained status is periodic. Give it one full interval plus a
+    // small delivery margin before declaring a connected session stale.
+    return now - state.connectedSinceMs <= kStatusIntervalMs + 60'000;
+  }
+  return now - state.lastPublishConfirmedMs <= (kStatusIntervalMs * 2U) + 60'000;
 }
 
 void MOMQTT::setObserverIdentity(std::string_view originId) {

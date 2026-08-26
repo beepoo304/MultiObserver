@@ -381,15 +381,17 @@ bool moEnqueueAlert(void* context, const uint8_t* secret,
   mesh::Utils::sha256(channel.hash, sizeof(channel.hash), channel.secret,
                       secretLength);
 
-  uint8_t payload[5 + MAX_TEXT_LEN + 32]{};
+  constexpr size_t kAlertTextMax = 130;
+  uint8_t payload[5 + kAlertTextMax + 1]{};
   const uint32_t timestamp = getRTCClock()->getCurrentTime();
   memcpy(payload, &timestamp, sizeof(timestamp));
   payload[4] = 0;  // TXT_TYPE_PLAIN
   const int prefixLength = snprintf(reinterpret_cast<char*>(&payload[5]),
                                     sizeof(payload) - 5, "%s: ", getNodeName());
-  if (prefixLength < 0 || prefixLength >= MAX_TEXT_LEN) return false;
+  if (prefixLength < 0 ||
+      static_cast<size_t>(prefixLength) >= kAlertTextMax) return false;
   size_t textLength = strlen(text);
-  const size_t textCapacity = static_cast<size_t>(MAX_TEXT_LEN - prefixLength);
+  const size_t textCapacity = kAlertTextMax - static_cast<size_t>(prefixLength);
   if (textLength > textCapacity) textLength = textCapacity;
   memcpy(&payload[5 + prefixLength], text, textLength);
 

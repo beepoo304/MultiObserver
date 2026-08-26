@@ -25,8 +25,10 @@ bool equals(std::string_view lhs, std::string_view rhs) {
 
 }  // namespace
 
-MOCli::MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt)
-    : config_(config), wifi_(wifi), mqtt_(mqtt) {}
+MOCli::MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt,
+             MOAlertChannel& channel, MOWatchdog& watchdog)
+    : config_(config), wifi_(wifi), mqtt_(mqtt), channel_(channel),
+      watchdog_(watchdog) {}
 
 bool MOCli::handleCommand(uint32_t senderTimestamp, const char* command,
                           char* reply) noexcept {
@@ -59,6 +61,95 @@ bool MOCli::handleCommand(uint32_t senderTimestamp, const char* command,
     return handleCustom(input, reply);
   }
 
+  if (startsWith(input, "get wdg.") || startsWith(input, "set wdg.") ||
+      input == "restart.wdg") {
+    return handleWatchdog(input, reply);
+  }
+
+  if (startsWith(input, "get channel.") || startsWith(input, "set channel.") ||
+      input == "test.channel") {
+    return handleChannel(input, reply);
+  }
+
+  return false;
+}
+
+bool MOCli::handleWatchdog(std::string_view command, char* reply) noexcept {
+  if (command == "get wdg.status") {
+    char buffer[kReplyCapacity]{};
+    watchdog_.formatStatus(buffer, sizeof(buffer));
+    return copyReply(reply, buffer);
+  }
+  if (command == "get wdg.grace") {
+    char buffer[32]{};
+    std::snprintf(buffer, sizeof(buffer), "WDG GRACE %u",
+                  static_cast<unsigned>(config_.etap2().graceSeconds()));
+    return copyReply(reply, buffer);
+  }
+  if (command == "get wdg.log") {
+    char buffer[kReplyCapacity]{};
+    return watchdog_.formatLog(buffer, sizeof(buffer)) && copyReply(reply, buffer);
+  }
+  if (command == "restart.wdg") {
+    watchdog_.restartGrace();
+    return copyReply(reply, "OK");
+  }
+
+  std::string_view key;
+  std::string_view value;
+  if (!splitSet(command, key, value)) return false;
+  if ((key == "wdg.on" || key == "wdg.off") && value.empty()) {
+    const bool enabled = key == "wdg.on";
+    watchdog_.setEnabled(enabled);
+    if (!config_.etap2().save()) return copyReply(reply, "ERR");
+    return copyReply(reply, "OK");
+  }
+  if (key == "wdg.grace") {
+    uint16_t seconds = 0;
+    if (!parsePort(value, seconds) ||
+        !config_.etap2().setGraceSeconds(seconds) ||
+        !config_.etap2().save()) return copyReply(reply, "ERR");
+    watchdog_.restartGrace();
+    return copyReply(reply, "OK");
+  }
+  if (key == "wdg.log" && value == "1") {
+    return copyReply(reply, watchdog_.clearLog() ? "CLEAR" : "ERR");
+  }
+  return false;
+}
+
+bool MOCli::handleChannel(std::string_view command, char* reply) noexcept {
+  if (command == "get channel.status") {
+    const char* status = !config_.etap2().channelEnabled()
+                             ? "CHANNEL OFF"
+                             : (channel_.ready() ? "CHANNEL READY"
+                                                 : "CHANNEL KEY/SENDER MISSING");
+    return copyReply(reply, status);
+  }
+  if (command == "get channel.key") {
+    return copyReply(reply, config_.etap2().channelKey().empty()
+                                ? "CHANNEL KEY CLEAR"
+                                : config_.etap2().channelKey());
+  }
+  if (command == "test.channel") {
+    char status[96]{};
+    watchdog_.formatStatus(status, sizeof(status));
+    return copyReply(reply, channel_.test(status) ? "QUEUED" : "ERR");
+  }
+
+  std::string_view key;
+  std::string_view value;
+  if (!splitSet(command, key, value)) return false;
+  if ((key == "channel.on" || key == "channel.off") && value.empty()) {
+    config_.etap2().setChannelEnabled(key == "channel.on");
+    return copyReply(reply, config_.etap2().save() ? "OK" : "ERR");
+  }
+  if (key == "channel.key") {
+    if (!config_.etap2().setChannelKey(value) || !config_.etap2().save()) {
+      return copyReply(reply, "ERR");
+    }
+    return copyReply(reply, "OK");
+  }
   return false;
 }
 

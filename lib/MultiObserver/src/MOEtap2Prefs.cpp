@@ -147,7 +147,7 @@ bool MOEtap2Prefs::appendLog(std::string_view day, std::string_view entry) const
 bool MOEtap2Prefs::readLastLogLines(std::string_view day, size_t maxLines,
                                     std::string& output) const {
   output.clear();
-  if (maxLines == 0 || !SPIFFS.exists(kLogFilename)) return true;
+  if (!SPIFFS.exists(kLogFilename)) return true;
   File file = SPIFFS.open(kLogFilename, "r");
   if (!file) return false;
   std::string content;
@@ -155,7 +155,11 @@ bool MOEtap2Prefs::readLastLogLines(std::string_view day, size_t maxLines,
   while (file.available()) content.push_back(static_cast<char>(file.read()));
   file.close();
   const std::string header = "D " + std::string(day) + "\n";
-  if (content.rfind(header, 0) != 0) return true;
+  if (content.rfind(header, 0) != 0) {
+    SPIFFS.remove(kLogFilename);
+    return true;
+  }
+  if (maxLines == 0) return true;
   std::vector<std::string> lines;
   size_t start = header.size();
   while (start < content.size()) {

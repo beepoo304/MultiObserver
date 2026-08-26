@@ -75,11 +75,16 @@ class MOWatchdog {
   Phase phase_{Phase::Grace};
   bool bootAfterWatchdog_{false};
   bool rebootScheduled_{false};
+  bool silentWifi_{false};
+  bool silentMqtt1_{false};
+  bool silentMqtt2_{false};
   uint32_t rebootAtMs_{0};
   uint32_t graceStartedMs_{0};
   uint32_t nextWifiCheckMs_{0};
   uint32_t nextMqttCheckMs_{0};
   uint32_t nextSilentCheckMs_{0};
+  uint32_t nextLogRotationCheckMs_{0};
+  int32_t logDayId_{-1};
   ServiceTrack wifiTrack_{};
   ServiceTrack mqtt1Track_{};
   ServiceTrack mqtt2Track_{};
