@@ -39,6 +39,14 @@ MO/
 │       ├── MOBridge.cpp
 │       └── MOBridge.h
 ├── installer/
+│   ├── mo_installer/
+│   │   ├── cli.py
+│   │   ├── common.py
+│   │   ├── patches.py
+│   │   ├── storage.py
+│   │   ├── validation.py
+│   │   └── workflow.py
+│   ├── tests/
 │   ├── install.py
 │   ├── multiobserver_cpp17.py
 │   └── verify.py
@@ -73,6 +81,8 @@ MO/
 - keep runtime configuration persistent
 - do not duplicate existing MeshCore functionality without a reason
 - keep secrets and local credentials out of Git
+- keep `install.py` as a thin entry point and isolate patching, validation,
+  backup and workflow responsibilities
 
 ## License
 

@@ -1,0 +1,1 @@
+"""MultiObserver installer internals."""
