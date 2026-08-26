@@ -141,6 +141,11 @@ name directly into the selected MeshCore target's `data/` directory.
 
 ## Quick start (Windows / Heltec V3)
 
+This is the recommended complete path for a new device. Commands marked
+**MultiObserver directory** are run in the cloned `MultiObserver` repository.
+Commands marked **prepared MeshCore directory** are run in the MeshCore source
+tree selected by the installer.
+
 ### Prerequisites
 
 - A clean MeshCore repeater source tree. MeshCore **1.15.0**, **1.16.0** and
@@ -148,19 +153,38 @@ name directly into the selected MeshCore target's `data/` directory.
 - Python 3 and PlatformIO (`py -3 -m platformio`).
 - A USB-connected Heltec V3 board when you are ready to flash it.
 
+### 0. Get MultiObserver
+
+Open PowerShell and clone the repository where you keep your projects:
+
+```powershell
+git clone https://github.com/beepoo304/MultiObserver.git
+cd .\MultiObserver
+```
+
+If you already downloaded or cloned MultiObserver, simply open PowerShell in
+that directory instead.
+
 ### 1. Apply MultiObserver to MeshCore
 
-From the `MultiObserver` directory, run:
+In the **MultiObserver directory**, start the interactive installer:
 
 ```powershell
 .\Run-Installer.cmd
 ```
 
-Enter the path to the clean MeshCore source tree, the repeater name, and the
-public/private identity keys when prompted. The installer creates a rollback
-backup, adds the minimal application/build hooks, prepares the MeshCore
-filesystem data (`data/identity/_main.id` and `data/prefs.json`), and verifies
-the resulting tree.
+When prompted, enter:
+
+1. The full path to a **clean MeshCore Repeater source tree** (for example,
+   `C:\Projects\MeshCore-repeater-v1.17.1`).
+2. The repeater name.
+3. The 64-character public identity key.
+4. The 128-character private identity key.
+
+The installer creates a rollback backup, adds the minimal application/build
+hooks, prepares the MeshCore filesystem data (`data/identity/_main.id` and
+`data/prefs.json`), then verifies the resulting tree. Keep the identity keys
+private: never commit or paste them into a public issue.
 
 For non-interactive or troubleshooting use:
 
@@ -171,17 +195,20 @@ python installer/verify.py <MeshCore-path>
 
 ### 2. Build the prepared MeshCore tree
 
-Change to the **MeshCore tree selected in step 1**, then build the Heltec V3
-repeater firmware:
+In PowerShell, change to the **prepared MeshCore directory selected in step
+1**. Replace the example path with your own:
 
 ```powershell
+cd "C:\Projects\MeshCore-repeater-v1.17.1"
 py -3 -m platformio run -e Heltec_v3_repeater
 ```
 
+Wait for `SUCCESS` before continuing.
+
 ### 3. Flash firmware and configuration
 
-After the first installation, or after an erase, upload both the firmware and
-the prepared filesystem. Run these commands from the prepared MeshCore tree:
+With the Heltec V3 connected by USB, and still in the **prepared MeshCore
+directory**, upload both the firmware and the filesystem:
 
 ```powershell
 py -3 -m platformio run -e Heltec_v3_repeater -t upload
@@ -201,11 +228,111 @@ credentials in a public repository.
 
 ### 4. Open the serial monitor
 
-The serial monitor uses 115200 baud:
+Still in the **prepared MeshCore directory**, open the serial monitor at 115200
+baud:
 
 ```powershell
 py -3 -m platformio device monitor -b 115200
 ```
+
+Press `Ctrl+C` to leave the monitor.
+
+### 5. Configure Wi-Fi and brokers
+
+Use the MeshCore CLI in the serial monitor to configure Wi-Fi and each broker.
+The values below are placeholders: use your own network and broker values.
+
+```text
+set wifi.ssid YourWiFiName
+set wifi.pwd YourWiFiPassword
+
+set mqtt1.on
+set mqtt1.host mqtt.example.org
+set mqtt1.port 443
+set mqtt1.transport wss
+set mqtt1.username YourMqttUser
+set mqtt1.pwd YourMqttPassword
+
+set mqtt2.on
+set mqtt2.host backup-mqtt.example.org
+set mqtt2.port 8883
+set mqtt2.transport tcp
+set mqtt2.username YourMqttUser
+set mqtt2.pwd YourMqttPassword
+```
+
+Verify the current configuration and connection state with:
+
+```text
+get wifi.status
+get mqtt1.status
+get mqtt2.status
+```
+
+Configuration is retained on the device. Restart Wi-Fi or an individual
+broker after changing settings when needed:
+
+```text
+restart.wifi
+restart.mqtt1
+restart.mqtt2
+```
+
+## MultiObserver CLI command reference
+
+Enter these commands in the MeshCore serial monitor. All settings are saved
+persistently. Commands and values are case-sensitive where shown.
+
+### Wi-Fi
+
+| Command | Description |
+| --- | --- |
+| `set wifi.ssid <SSID>` | Save the Wi-Fi network name and reconnect. |
+| `set wifi.pwd <password>` | Save the Wi-Fi password and reconnect. |
+| `get wifi.ssid` | Show the configured Wi-Fi network name. |
+| `get wifi.status` | Show Wi-Fi state, IP address and diagnostic details. |
+| `restart.wifi` | Restart Wi-Fi using the saved credentials. |
+
+### MQTT broker 1
+
+| Command | Description |
+| --- | --- |
+| `set mqtt1.on` | Enable broker 1 and start connecting. |
+| `set mqtt1.off` | Disable broker 1 and disconnect it. |
+| `set mqtt1.host <hostname>` | Set the broker hostname. |
+| `set mqtt1.port <1-65535>` | Set the broker port. |
+| `set mqtt1.transport tcp` | Use direct MQTT over TCP. |
+| `set mqtt1.transport wss` | Use secure MQTT over WebSocket (WSS/TLS). |
+| `set mqtt1.username <username>` | Set the MQTT username. |
+| `set mqtt1.pwd <password>` | Set the MQTT password. |
+| `get mqtt1.status` | Show enabled/disabled state, connection state, host, failures and last error. |
+| `restart.mqtt1` | Restart broker 1 using the saved settings. |
+
+### MQTT broker 2
+
+Broker 2 uses the same commands as broker 1. Replace `mqtt1` with `mqtt2`:
+
+| Command | Description |
+| --- | --- |
+| `set mqtt2.on` / `set mqtt2.off` | Enable or disable broker 2. |
+| `set mqtt2.host <hostname>` | Set the broker hostname. |
+| `set mqtt2.port <1-65535>` | Set the broker port. |
+| `set mqtt2.transport tcp` | Use direct MQTT over TCP. |
+| `set mqtt2.transport wss` | Use secure MQTT over WebSocket (WSS/TLS). |
+| `set mqtt2.username <username>` | Set the MQTT username. |
+| `set mqtt2.pwd <password>` | Set the MQTT password. |
+| `get mqtt2.status` | Show broker 2 connection and diagnostic state. |
+| `restart.mqtt2` | Restart broker 2 using the saved settings. |
+
+### Observer location / IATA code
+
+| Command | Description |
+| --- | --- |
+| `set mqtt.iata <ABC>` | Set the three-letter uppercase IATA location code used by MQTT telemetry. |
+| `get mqtt.iata` | Show the saved IATA location code. |
+
+For example, use `set mqtt.iata KTW` for Katowice. The code must contain
+exactly three uppercase letters.
 
 ## EastMesh mechanism reference
 
