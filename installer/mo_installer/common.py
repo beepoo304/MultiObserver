@@ -17,6 +17,7 @@ MARKERS = {
 MO_FILES = [
     "MO.h", "MO.cpp", "MOCli.h", "MOCli.cpp", "MOConfig.h", "MOConfig.cpp",
     "MOEtap2Prefs.h", "MOEtap2Prefs.cpp",
+    "MOWatchdog.h", "MOWatchdog.cpp",
     "MOMQTT.h", "MOMQTT.cpp", "MOMQTTPrefs.h", "MOMQTTPrefs.cpp",
     "MOWifi.h", "MOWifi.cpp", "MOWifiPrefs.h", "MOWifiPrefs.cpp",
 ]

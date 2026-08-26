@@ -9,7 +9,9 @@
 #include <utility>
 
 MO::MO()
-    : mqtt_(config_.mqtt(), wifi_), cli_(config_, wifi_, mqtt_) {}
+    : mqtt_(config_.mqtt(), wifi_),
+      watchdog_(config_.etap2(), wifi_, mqtt_),
+      cli_(config_, wifi_, mqtt_) {}
 
 void MO::begin() {
   if (started_) {
@@ -21,6 +23,7 @@ void MO::begin() {
   Serial.printf("[MO] config load: %s\n", configLoaded ? "OK" : "defaults");
   wifi_.begin(config_.wifi().ssid(), config_.wifi().password());
   mqtt_.begin();
+  watchdog_.begin();
 
   started_ = true;
   Serial.println("[MO] ready");
@@ -33,6 +36,7 @@ void MO::loop() {
 
   wifi_.loop();
   mqtt_.loop();
+  watchdog_.loop();
 
   while (rxCount_ != 0) {
     const RxEvent event = rxQueue_[rxTail_];

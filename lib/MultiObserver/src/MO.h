@@ -3,6 +3,7 @@
 #include "MOConfig.h"
 #include "MOCli.h"
 #include "MOMQTT.h"
+#include "MOWatchdog.h"
 #include "MOWifi.h"
 
 #include <array>
@@ -90,6 +91,7 @@ class MO {
   MOConfig config_;
   MOWifi wifi_;
   MOMQTT mqtt_;
+  MOWatchdog watchdog_;
   MOCli cli_;
 
   std::array<RxEvent, kRxQueueCapacity> rxQueue_{};
