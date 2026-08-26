@@ -296,6 +296,10 @@ restart.mqtt2
 Enter these commands in the MeshCore serial monitor. All settings are saved
 persistently. Commands and values are case-sensitive where shown.
 
+For a standalone operational reference containing all 41 MultiObserver
+commands, replies, validation rules and a safe first-configuration sequence,
+see [CLI_REFERENCE.md](CLI_REFERENCE.md).
+
 ### Wi-Fi
 
 | Command | Description |
