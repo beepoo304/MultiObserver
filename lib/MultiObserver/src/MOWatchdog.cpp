@@ -1,5 +1,7 @@
 #include "MOWatchdog.h"
 
+#include "MOLocalTime.h"
+
 #include <Arduino.h>
 
 #include <cstdio>
@@ -21,13 +23,13 @@ void MOWatchdog::loop() {
   const uint32_t now = millis();
   if (elapsed(now, nextLogRotationCheckMs_)) {
     nextLogRotationCheckMs_ = now + 1'000;
-    const time_t clock = time(nullptr);
-    struct tm utc{};
-    if (clock >= 1735689600 && gmtime_r(&clock, &utc) != nullptr) {
-      const int32_t dayId = (utc.tm_year * 366) + utc.tm_yday;
+    struct tm local{};
+    if (MOLocalTime::now(local)) {
+      const int32_t dayId = (local.tm_year * 366) + local.tm_yday;
       if (dayId != logDayId_) {
         logDayId_ = dayId;
-        char day[12]{}; std::strftime(day, sizeof(day), "%Y-%m-%d", &utc);
+        char day[12]{};
+        std::strftime(day, sizeof(day), "%Y-%m-%d", &local);
         std::string ignored;
         prefs_.readLastLogLines(day, 0, ignored);
       }
@@ -320,14 +322,13 @@ void MOWatchdog::sendAlert(const char* text) {
 }
 
 void MOWatchdog::logEvent(const char* event) const {
-  const time_t now = time(nullptr);
-  struct tm utc{};
-  if (now < 1735689600 || gmtime_r(&now, &utc) == nullptr) return;
+  struct tm local{};
+  if (!MOLocalTime::now(local)) return;
   char day[12]{};
   char stamp[12]{};
   char line[96]{};
-  std::strftime(day, sizeof(day), "%Y-%m-%d", &utc);
-  std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &utc);
+  std::strftime(day, sizeof(day), "%Y-%m-%d", &local);
+  std::strftime(stamp, sizeof(stamp), "%H:%M:%S", &local);
   std::snprintf(line, sizeof(line), "%s %s", stamp, event);
   prefs_.appendLog(day, line);
 }
@@ -394,14 +395,13 @@ void MOWatchdog::formatStatus(char* output, size_t outputSize) const noexcept {
 
 bool MOWatchdog::formatLog(char* output, size_t outputSize) const noexcept {
   if (output == nullptr || outputSize == 0) return false;
-  const time_t now = time(nullptr);
-  struct tm utc{};
-  if (now < 1735689600 || gmtime_r(&now, &utc) == nullptr) {
+  struct tm local{};
+  if (!MOLocalTime::now(local)) {
     std::snprintf(output, outputSize, "CLEAR");
     return true;
   }
   char day[12]{};
-  std::strftime(day, sizeof(day), "%Y-%m-%d", &utc);
+  std::strftime(day, sizeof(day), "%Y-%m-%d", &local);
   std::string lines;
   if (!prefs_.readLastLogLines(day, 5, lines)) return false;
   std::snprintf(output, outputSize, "%s", lines.empty() ? "CLEAR" : lines.c_str());

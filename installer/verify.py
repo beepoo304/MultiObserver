@@ -41,6 +41,7 @@ MO_FILES = [
     "MOCli.h", "MOCli.cpp",
     "MOConfig.h", "MOConfig.cpp",
     "MOEtap2Prefs.h", "MOEtap2Prefs.cpp",
+    "MOLocalTime.h", "MOLocalTime.cpp",
     "MOWatchdog.h", "MOWatchdog.cpp",
     "MOAlertChannel.h", "MOAlertChannel.cpp",
     "MOMQTT.h", "MOMQTT.cpp",

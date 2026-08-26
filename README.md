@@ -363,7 +363,7 @@ both an active session and fresh acknowledgement of a periodic status publish.
 | `get wdg.grace` | Show the saved startup grace period in seconds. |
 | `set wdg.grace <120-300>` | Save the grace period and restart WDG grace. |
 | `restart.wdg` | Reset only the WDG state machine and grace timer; do not reboot the ESP. |
-| `get wdg.log` | Return the last five short events from the current repeater-clock day. |
+| `get wdg.log` | Return the last five short events from the current local repeater day. |
 | `set wdg.log 1` | Clear the WDG event log. |
 
 Wi-Fi recovery escalates after 3, 5 and 30 minutes. MQTT1 and MQTT2 are
@@ -471,3 +471,8 @@ remain outside the current V1 scope.
 The Heltec fixes reproduce the observed EastMesh behavior without moving
 business logic into MeshCore core: the installer adds only verified
 application/build hooks, while `MOBridge` remains the thin adapter to MO.
+Human-readable AlertChannel and WDG-log timestamps use the local repeater time.
+The default is Central European time with automatic CET/CEST daylight-saving
+changes. Override the POSIX timezone at build time with
+`-D MULTIOBSERVER_TZ=\"your-POSIX-TZ\"`. MeshCore packet epochs and MQTT
+timestamps remain UTC.

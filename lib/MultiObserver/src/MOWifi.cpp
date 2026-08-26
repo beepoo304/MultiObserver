@@ -1,5 +1,7 @@
 #include "MOWifi.h"
 
+#include "MOLocalTime.h"
+
 #include <Arduino.h>
 #include <esp_sntp.h>
 
@@ -7,8 +9,6 @@
 #include <ctime>
 
 namespace {
-
-constexpr time_t kMinSaneEpoch = 1735689600;  // 2025-01-01T00:00:00Z
 
 const char* wifiStatusName(wl_status_t status) {
   switch (status) {
@@ -36,6 +36,7 @@ const char* wifiStatusName(wl_status_t status) {
 MOWifi::MOWifi() = default;
 
 void MOWifi::begin(const std::string& ssid, const std::string& password) {
+  MOLocalTime::configure();
   setCredentials(ssid, password);
   Serial.printf("[MO][WiFi] start t=%lu ssid=%s\n",
                 static_cast<unsigned long>(millis()),
@@ -263,7 +264,8 @@ void MOWifi::updateTimeSync() {
   }
 
   if (!timeSyncStarted_) {
-    configTzTime("UTC0", "pool.ntp.org", "time.google.com", "time.cloudflare.com");
+    configTzTime(MOLocalTime::timezone(), "pool.ntp.org", "time.google.com",
+                 "time.cloudflare.com");
     timeSyncStarted_ = true;
     Serial.printf("[MO][NTP] start t=%lu\n",
                   static_cast<unsigned long>(millis()));
@@ -272,7 +274,7 @@ void MOWifi::updateTimeSync() {
   const time_t now = time(nullptr);
   const sntp_sync_status_t syncStatus = sntp_get_sync_status();
   const bool ready =
-      now >= kMinSaneEpoch &&
+      now >= MOLocalTime::kMinSaneEpoch &&
       (syncStatus == SNTP_SYNC_STATUS_COMPLETED ||
        syncStatus == SNTP_SYNC_STATUS_IN_PROGRESS);
   if (ready && !timeSynced_) {

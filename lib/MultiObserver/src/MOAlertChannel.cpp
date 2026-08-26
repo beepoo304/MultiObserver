@@ -1,5 +1,7 @@
 #include "MOAlertChannel.h"
 
+#include "MOLocalTime.h"
+
 #include <Arduino.h>
 
 #include <cstdio>
@@ -80,11 +82,10 @@ bool MOAlertChannel::sendFormatted(const char* text) const noexcept {
 
 void MOAlertChannel::timestamp(char* output, size_t outputSize) noexcept {
   if (output == nullptr || outputSize == 0) return;
-  const time_t now = time(nullptr);
-  struct tm utc{};
-  if (now < 1735689600 || gmtime_r(&now, &utc) == nullptr) {
+  struct tm local{};
+  if (!MOLocalTime::now(local)) {
     std::snprintf(output, outputSize, "time-unknown");
     return;
   }
-  std::strftime(output, outputSize, "%Y-%m-%d %H:%M:%S", &utc);
+  std::strftime(output, outputSize, "%Y-%m-%d %H:%M:%S", &local);
 }
