@@ -366,6 +366,14 @@ both an active session and fresh acknowledgement of a periodic status publish.
 | `get wdg.log` | Return the last five short events from the current local repeater day. |
 | `set wdg.log 1` | Clear the WDG event log. |
 
+The persistent WDG log is deliberately small: it keeps at most the five most
+recent short events and their local repeater times. Events may include WDG
+startup, a service becoming unavailable or recovering, staged restarts,
+silent-mode transitions and reboot scheduling/cancellation. When the local
+calendar day changes, the previous day's entries are discarded automatically;
+`set wdg.log 1` clears them immediately. If the clock is not yet valid, WDG
+continues operating but does not invent a timestamped log entry.
+
 Wi-Fi recovery escalates after 3, 5 and 30 minutes. MQTT1 and MQTT2 are
 supervised independently and escalate after 3, 5, 15 and 30 minutes. The last
 stage queues an encrypted alert and schedules one ESP reboot three minutes
@@ -438,6 +446,17 @@ and handed directly to the repeater's existing scoped outbound queue.
 MultiObserver does not maintain a second queue, retry alerts, wait for ACKs or
 control the radio directly.
 
+`test.channel` returns `QUEUED` when MeshCore's native outbound queue accepts
+the encrypted message. This is intentionally not reported as `SENT` or
+`DELIVERED`: actual airtime remains under MeshCore control and AlertChannel
+does not wait for a delivery acknowledgement.
+
+Human-readable AlertChannel and WDG-log timestamps use the local repeater time.
+The default is Central European time with automatic CET/CEST daylight-saving
+changes. Override the POSIX timezone at build time with
+`-D MULTIOBSERVER_TZ=\"your-POSIX-TZ\"`. MeshCore packet epochs and MQTT
+timestamps remain UTC.
+
 #### How AlertChannel works
 
 1. `set channel.key` validates and persistently stores a 128-bit or 256-bit
@@ -471,8 +490,3 @@ remain outside the current V1 scope.
 The Heltec fixes reproduce the observed EastMesh behavior without moving
 business logic into MeshCore core: the installer adds only verified
 application/build hooks, while `MOBridge` remains the thin adapter to MO.
-Human-readable AlertChannel and WDG-log timestamps use the local repeater time.
-The default is Central European time with automatic CET/CEST daylight-saving
-changes. Override the POSIX timezone at build time with
-`-D MULTIOBSERVER_TZ=\"your-POSIX-TZ\"`. MeshCore packet epochs and MQTT
-timestamps remain UTC.
