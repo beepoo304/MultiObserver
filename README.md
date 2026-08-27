@@ -383,7 +383,7 @@ supervised independently and escalate after 3, 5, 15 and 30 minutes. The last
 stage queues an encrypted alert and schedules one ESP reboot three minutes
 later. A persistent one-shot marker distinguishes that reboot from manual
 restart or power loss. If the failed service is still down after the next
-grace period, WDG enters silent mode and checks every 15 minutes without
+grace period, WDG enters silent mode and checks every minute without
 further restarts or reboot loops. A `*.restore` alert is sent only after
 recovery from silent mode; its duration starts at entry into silent mode.
 
@@ -423,7 +423,7 @@ On boot, WDG consumes and deletes its reboot marker immediately. After grace,
 `AlertChannel newStart` is queued. If a supervised service is still down and
 that consumed marker identified this as the WDG-requested reboot, WDG enters
 silent mode. Silent mode performs no service restart and schedules no further
-ESP reboot. It checks every 15 minutes. Once a failed service recovers, AC
+ESP reboot. It checks every minute. Once a failed service recovers, AC
 queues `wifi.restore`, `mqtt1.restore` or `mqtt2.restore` with a duration
 measured only from entry into silent mode. Normal/manual boot and power loss do
 not activate silent mode.

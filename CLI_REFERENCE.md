@@ -124,7 +124,7 @@ WDG phases shown by `get wdg.status` are:
 | --- | --- |
 | `GRACE` | Startup protection is active; WDG is waiting before supervision begins. |
 | `NORMAL` | Normal staged supervision and recovery are active. |
-| `SILENT` | The previous reboot was requested by WDG and a failed service is checked every 15 minutes without another reboot loop. |
+| `SILENT` | The previous reboot was requested by WDG and a failed service is checked every minute without another reboot loop. |
 
 MQTT status inside the WDG reply is `OFF` when that broker is not configured
 for supervision. A pending final-stage reboot is reported as `reboot=PENDING`.

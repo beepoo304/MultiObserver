@@ -44,7 +44,7 @@ class MOWatchdog {
 
   static constexpr uint32_t kWifiCheckMs = 5'000;
   static constexpr uint32_t kMqttCheckMs = 15'000;
-  static constexpr uint32_t kSilentCheckMs = 15 * 60'000;
+  static constexpr uint32_t kSilentCheckMs = 60'000;
   static constexpr uint32_t kWifiFirstMs = 3 * 60'000;
   static constexpr uint32_t kWifiSecondMs = 5 * 60'000;
   static constexpr uint32_t kWifiThirdMs = 30 * 60'000;
