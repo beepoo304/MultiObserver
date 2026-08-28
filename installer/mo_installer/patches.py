@@ -411,6 +411,92 @@ bool moEnqueueAlert(void* context, const uint8_t* secret,
     )
     return mymesh_h, mymesh_cpp
 
+def patch_remote_cli_bridge(mymesh_h: str, mymesh_cpp: str) -> tuple[str, str]:
+    marker = "MULTIOBSERVER: remote CLI bridge v1"
+    channel_search = (
+        "  int searchChannelsByHash(const uint8_t* hash, "
+        "mesh::GroupChannel dest[], int maxMatches) override;"
+    )
+    channel_receive = (
+        "  void onGroupDataRecv(mesh::Packet* packet, uint8_t type, "
+        "const mesh::GroupChannel& channel, uint8_t* data, size_t len) override;"
+    )
+    if channel_search not in mymesh_h:
+        anchor = "  int searchPeersByHash(const uint8_t* hash) override;"
+        if mymesh_h.count(anchor) != 1:
+            raise InstallError("Cannot locate MeshCore channel-search hook.")
+        mymesh_h = mymesh_h.replace(
+            anchor, anchor + "\n" + channel_search + "\n" + channel_receive, 1
+        )
+
+    if marker in mymesh_cpp:
+        return mymesh_h, mymesh_cpp
+
+    namespace_anchor = "}  // namespace\n// MULTIOBSERVER: native alert queue bridge v1"
+    if mymesh_cpp.count(namespace_anchor) != 1:
+        raise InstallError("Cannot locate MultiObserver callback namespace.")
+    executor = """void moExecuteRemoteCli(void* context, uint32_t senderTimestamp,
+                        char* command, char* reply) {
+  if (context != nullptr) {
+    static_cast<MyMesh*>(context)->handleCommand(senderTimestamp, command, reply);
+  }
+}
+"""
+    mymesh_cpp = mymesh_cpp.replace(
+        namespace_anchor, executor + namespace_anchor, 1
+    )
+
+    begin_hook = "  mo_bridge.setAlertSender(&moEnqueueAlert, this);"
+    if mymesh_cpp.count(begin_hook) != 1:
+        raise InstallError("Cannot locate MultiObserver alert sender hook.")
+    mymesh_cpp = mymesh_cpp.replace(
+        begin_hook,
+        begin_hook +
+        "\n  mo_bridge.setRemoteCliExecutor(&moExecuteRemoteCli, this);",
+        1,
+    )
+
+    implementation_anchor = "bool MyMesh::enqueueMultiObserverAlert("
+    if mymesh_cpp.count(implementation_anchor) != 1:
+        raise InstallError("Cannot locate MultiObserver channel sender.")
+    implementation = """int MyMesh::searchChannelsByHash(
+    const uint8_t* hash, mesh::GroupChannel dest[], int maxMatches) {
+  if (hash == nullptr || dest == nullptr || maxMatches < 1) return 0;
+
+  uint8_t secret[32]{};
+  size_t secretLength = 0;
+  if (!mo_bridge.copyRemoteCliChannelSecret(secret, sizeof(secret),
+                                             secretLength)) return 0;
+
+  mesh::GroupChannel channel{};
+  memcpy(channel.secret, secret, secretLength);
+  mesh::Utils::sha256(channel.hash, sizeof(channel.hash), channel.secret,
+                      secretLength);
+  if (channel.hash[0] != hash[0]) return 0;
+  dest[0] = channel;
+  return 1;
+}
+
+void MyMesh::onGroupDataRecv(mesh::Packet*, uint8_t type,
+                             const mesh::GroupChannel&, uint8_t* data,
+                             size_t len) {
+  if (type != PAYLOAD_TYPE_GRP_TXT || data == nullptr || len < 5 ||
+      (data[4] >> 2) != 0) return;
+
+  uint32_t senderTimestamp = 0;
+  memcpy(&senderTimestamp, data, sizeof(senderTimestamp));
+  data[len] = 0;
+  mo_bridge.handleRemoteCli(senderTimestamp, getNodeName(),
+                            reinterpret_cast<const char*>(&data[5]));
+}
+
+// MULTIOBSERVER: remote CLI bridge v1
+"""
+    mymesh_cpp = mymesh_cpp.replace(
+        implementation_anchor, implementation + implementation_anchor, 1
+    )
+    return mymesh_h, mymesh_cpp
+
 def patch_tx_led_mymesh(text: str) -> str:
     # MeshCore's radio wrapper already calls onAfterTransmit() on success and
     # failure. Strip the redundant MO guards from v1/v2 installations.

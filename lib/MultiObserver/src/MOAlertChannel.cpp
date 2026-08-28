@@ -30,6 +30,20 @@ bool MOAlertChannel::ready() const noexcept {
           prefs_.channelKey().size() == MOEtap2Prefs::kChannelKeyMaxHexLength);
 }
 
+bool MOAlertChannel::copySecret(uint8_t* secret, size_t capacity,
+                                size_t& length) const noexcept {
+  if (secret == nullptr || capacity < kSecretLength) return false;
+  return decodeKey(secret, length);
+}
+
+bool MOAlertChannel::sendRaw(const char* text) const noexcept {
+  if (!ready() || text == nullptr || text[0] == '\0') return false;
+  uint8_t secret[kSecretLength]{};
+  size_t secretLength = 0;
+  if (!decodeKey(secret, secretLength)) return false;
+  return sender_(senderContext_, secret, secretLength, text);
+}
+
 bool MOAlertChannel::send(const char* text) const noexcept {
   if (text == nullptr || *text == '\0') return false;
   return sendFormatted(text);
@@ -65,16 +79,13 @@ bool MOAlertChannel::sendFormatted(const char* text) const noexcept {
     Serial.println("[MO][CHANNEL] skip disabled/key/sender");
     return false;
   }
-  uint8_t secret[kSecretLength]{};
-  size_t secretLength = 0;
-  if (!decodeKey(secret, secretLength)) return false;
   char stamp[24]{};
   timestamp(stamp, sizeof(stamp));
   char message[kMaxMessageLength + 1]{};
   const int written = std::snprintf(message, sizeof(message), "%s %s", text, stamp);
   if (written < 0) return false;
   message[kMaxMessageLength] = '\0';
-  const bool queued = sender_(senderContext_, secret, secretLength, message);
+  const bool queued = sendRaw(message);
   Serial.printf("[MO][CHANNEL] %s text=%s\n",
                 queued ? "queued" : "rejected", message);
   return queued;

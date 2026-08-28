@@ -14,6 +14,9 @@ class MOAlertChannel {
 
   void setSender(Sender sender, void* context) noexcept;
   [[nodiscard]] bool ready() const noexcept;
+  bool copySecret(uint8_t* secret, size_t capacity,
+                  size_t& length) const noexcept;
+  bool sendRaw(const char* text) const noexcept;
   bool send(const char* text) const noexcept;
   bool test(const char* watchdogStatus) const noexcept;
 

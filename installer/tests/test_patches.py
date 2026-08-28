@@ -3,7 +3,11 @@ from __future__ import annotations
 import unittest
 
 from installer.mo_installer.common import InstallError
-from installer.mo_installer.patches import patch_alert_channel_bridge, patch_platformio
+from installer.mo_installer.patches import (
+    patch_alert_channel_bridge,
+    patch_platformio,
+    patch_remote_cli_bridge,
+)
 
 
 TARGET = "[env:Heltec_v3_repeater]"
@@ -98,6 +102,48 @@ void MyMesh::begin(FILESYSTEM *fs) {
         )
         self.assertEqual(twice_header, once_header)
         self.assertEqual(twice_source, once_source)
+
+
+class RemoteCliBridgePatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.header = """class MyMesh {
+  int searchPeersByHash(const uint8_t* hash) override;
+public:
+  const char* getNodeName() { return _prefs.node_name; }
+};
+"""
+        self.source = """MOBridge mo_bridge;
+
+namespace {
+bool moEnqueueAlert(void* context, const uint8_t* secret,
+                    size_t secretLength, const char* text) {
+  return true;
+}
+}  // namespace
+// MULTIOBSERVER: native alert queue bridge v1
+
+bool MyMesh::enqueueMultiObserverAlert(
+    const uint8_t* secret, size_t secretLength, const char* text) {
+  return true;
+}
+
+void MyMesh::begin(FILESYSTEM *fs) {
+  mo_bridge.setAlertSender(&moEnqueueAlert, this);
+}
+"""
+
+    def test_uses_meshcore_channel_hooks_and_existing_cli(self) -> None:
+        header, source = patch_remote_cli_bridge(self.header, self.source)
+        self.assertIn("searchChannelsByHash", header)
+        self.assertIn("onGroupDataRecv", header)
+        self.assertIn("handleCommand(senderTimestamp, command, reply)", source)
+        self.assertIn("copyRemoteCliChannelSecret", source)
+        self.assertIn("setRemoteCliExecutor", source)
+
+    def test_is_idempotent(self) -> None:
+        once = patch_remote_cli_bridge(self.header, self.source)
+        twice = patch_remote_cli_bridge(*once)
+        self.assertEqual(twice, once)
 
 
 if __name__ == "__main__":

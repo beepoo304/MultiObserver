@@ -21,11 +21,13 @@ class MOEtap2Prefs {
   [[nodiscard]] uint16_t graceSeconds() const noexcept;
   [[nodiscard]] bool channelEnabled() const noexcept;
   [[nodiscard]] const std::string& channelKey() const noexcept;
+  [[nodiscard]] bool remoteCliEnabled() const noexcept;
 
   void setWatchdogEnabled(bool enabled) noexcept;
   bool setGraceSeconds(uint16_t seconds) noexcept;
   void setChannelEnabled(bool enabled) noexcept;
   bool setChannelKey(std::string_view key) noexcept;
+  void setRemoteCliEnabled(bool enabled) noexcept;
 
   // This marker is deliberately separate from user preferences. It is written
   // immediately before an ESP restart and consumed exactly once at next boot.
@@ -44,4 +46,5 @@ class MOEtap2Prefs {
   uint16_t graceSeconds_{kDefaultGraceSeconds};
   bool channelEnabled_{false};
   std::string channelKey_;
+  bool remoteCliEnabled_{false};
 };

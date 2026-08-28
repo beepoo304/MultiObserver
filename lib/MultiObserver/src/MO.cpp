@@ -12,6 +12,7 @@ MO::MO()
     : mqtt_(config_.mqtt(), wifi_),
       alertChannel_(config_.etap2()),
       watchdog_(config_.etap2(), wifi_, mqtt_),
+      remoteCli_(config_.etap2(), alertChannel_),
       cli_(config_, wifi_, mqtt_, alertChannel_, watchdog_) {}
 
 void MO::begin() {
@@ -208,6 +209,22 @@ void MO::setStatusSnapshot(const MOMQTT::StatusData& status) {
 
 void MO::setAlertSender(AlertSender sender, void* context) noexcept {
   alertChannel_.setSender(sender, context);
+}
+
+void MO::setRemoteCliExecutor(RemoteCliExecutor executor,
+                              void* context) noexcept {
+  remoteCli_.setExecutor(executor, context);
+}
+
+bool MO::copyRemoteCliChannelSecret(uint8_t* secret, size_t capacity,
+                                    size_t& length) const noexcept {
+  return remoteCli_.copyChannelSecret(secret, capacity, length);
+}
+
+bool MO::handleRemoteCli(uint32_t senderTimestamp, const char* localName,
+                         const char* channelText) noexcept {
+  return started_ &&
+         remoteCli_.handle(senderTimestamp, localName, channelText);
 }
 
 bool MO::forwardWatchdogAlert(void* context, const char* text) {

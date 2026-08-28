@@ -14,6 +14,8 @@ constexpr uint32_t kRebootMagic = 0x4D4F5752; // MOWR
 constexpr char kPrefsFilename[] = "/mo_etap2_prefs";
 constexpr char kRebootFilename[] = "/mo_wdg_reboot";
 constexpr char kLogFilename[] = "/mo_wdg_log";
+constexpr char kRemoteCliFilename[] = "/mo_rcli_on";
+constexpr uint32_t kRemoteCliMagic = 0x4D4F5243; // MORC
 
 struct PersistedPrefs {
   uint32_t magic;
@@ -63,6 +65,7 @@ void MOEtap2Prefs::defaults() {
   graceSeconds_ = kDefaultGraceSeconds;
   channelEnabled_ = false;
   channelKey_.clear();
+  remoteCliEnabled_ = false;
 }
 
 bool MOEtap2Prefs::load() {
@@ -81,6 +84,10 @@ bool MOEtap2Prefs::load() {
   channelEnabled_ = persisted.channelEnabled != 0;
   channelKey_ = persisted.channelKey;
   if (!validKey(channelKey_)) channelKey_.clear();
+  uint32_t remoteCliMarker = 0;
+  remoteCliEnabled_ = readExact(kRemoteCliFilename, &remoteCliMarker,
+                                sizeof(remoteCliMarker)) &&
+                      remoteCliMarker == kRemoteCliMagic;
   return true;
 }
 
@@ -91,13 +98,20 @@ bool MOEtap2Prefs::save() const {
   persisted.graceSeconds = graceSeconds_;
   persisted.channelEnabled = channelEnabled_ ? 1 : 0;
   copyKey(persisted.channelKey, sizeof(persisted.channelKey), channelKey_);
-  return writeExact(kPrefsFilename, &persisted, sizeof(persisted));
+  if (!writeExact(kPrefsFilename, &persisted, sizeof(persisted))) return false;
+  if (remoteCliEnabled_) {
+    return writeExact(kRemoteCliFilename, &kRemoteCliMagic,
+                      sizeof(kRemoteCliMagic));
+  }
+  if (SPIFFS.exists(kRemoteCliFilename)) SPIFFS.remove(kRemoteCliFilename);
+  return true;
 }
 
 bool MOEtap2Prefs::watchdogEnabled() const noexcept { return watchdogEnabled_; }
 uint16_t MOEtap2Prefs::graceSeconds() const noexcept { return graceSeconds_; }
 bool MOEtap2Prefs::channelEnabled() const noexcept { return channelEnabled_; }
 const std::string& MOEtap2Prefs::channelKey() const noexcept { return channelKey_; }
+bool MOEtap2Prefs::remoteCliEnabled() const noexcept { return remoteCliEnabled_; }
 void MOEtap2Prefs::setWatchdogEnabled(bool enabled) noexcept { watchdogEnabled_ = enabled; }
 bool MOEtap2Prefs::setGraceSeconds(uint16_t seconds) noexcept {
   if (seconds < kMinGraceSeconds || seconds > kMaxGraceSeconds) return false;
@@ -111,6 +125,9 @@ bool MOEtap2Prefs::setChannelKey(std::string_view key) noexcept {
   std::transform(channelKey_.begin(), channelKey_.end(), channelKey_.begin(),
                  [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
   return true;
+}
+void MOEtap2Prefs::setRemoteCliEnabled(bool enabled) noexcept {
+  remoteCliEnabled_ = enabled;
 }
 
 bool MOEtap2Prefs::markWatchdogReboot() const {

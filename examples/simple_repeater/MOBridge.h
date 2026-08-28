@@ -11,6 +11,7 @@ class Packet;
 class MOBridge {
  public:
   using AlertSender = MO::AlertSender;
+  using RemoteCliExecutor = MO::RemoteCliExecutor;
   void begin();
   void loop();
   void end();
@@ -44,6 +45,11 @@ class MOBridge {
   void setObserverIdentity(const char* name,
                           const char* publicKeyHex) noexcept;
   void setAlertSender(AlertSender sender, void* context) noexcept;
+  void setRemoteCliExecutor(RemoteCliExecutor executor, void* context) noexcept;
+  bool copyRemoteCliChannelSecret(uint8_t* secret, size_t capacity,
+                                  size_t& length) const noexcept;
+  bool handleRemoteCli(uint32_t senderTimestamp, const char* localName,
+                       const char* channelText) noexcept;
 
   void setStatusSnapshot(const StatusSnapshot& status) noexcept;
 

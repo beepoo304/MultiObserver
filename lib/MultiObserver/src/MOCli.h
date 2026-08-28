@@ -29,6 +29,7 @@ class MOCli {
   bool handleCustom(std::string_view command, char* reply) noexcept;
   bool handleWatchdog(std::string_view command, char* reply) noexcept;
   bool handleChannel(std::string_view command, char* reply) noexcept;
+  bool handleRemoteCli(std::string_view command, char* reply) noexcept;
 
   bool setWifiSsid(std::string_view value, char* reply) noexcept;
   bool setWifiPassword(std::string_view value, char* reply) noexcept;

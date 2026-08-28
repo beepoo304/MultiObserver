@@ -183,6 +183,12 @@ def main() -> int:
         and "mo_bridge.setAlertSender(&moEnqueueAlert, this);" in mymesh_cpp,
         "no MultiObserver alert queue": "alertQueue" not in mymesh_cpp
         and "retryAlert" not in mymesh_cpp,
+        "remote CLI bridge": "MULTIOBSERVER: remote CLI bridge v1" in mymesh_cpp
+        and "searchChannelsByHash" in mymesh_cpp
+        and "onGroupDataRecv" in mymesh_cpp
+        and "mo_bridge.setRemoteCliExecutor(&moExecuteRemoteCli, this);" in mymesh_cpp,
+        "remote CLI native handler":
+        "handleCommand(senderTimestamp, command, reply)" in mymesh_cpp,
         "watchdog CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get wdg.status", "wdg.on", "wdg.off", "get wdg.grace",
             "wdg.grace", "restart.wdg", "get wdg.log", "wdg.log",
@@ -190,6 +196,9 @@ def main() -> int:
         "alert channel CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get channel.status", "channel.on", "channel.off",
             "get channel.key", "channel.key", "test.channel",
+        )),
+        "remote CLI settings": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
+            "get rcli.status", "rcli.on", "rcli.off",
         )),
         "MOMQTT status": "publishStatus" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "MOMQTT LWT": "last_will" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),

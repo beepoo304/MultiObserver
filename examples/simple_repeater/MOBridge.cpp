@@ -102,6 +102,21 @@ void MOBridge::setAlertSender(AlertSender sender, void* context) noexcept {
   observer_.setAlertSender(sender, context);
 }
 
+void MOBridge::setRemoteCliExecutor(RemoteCliExecutor executor,
+                                    void* context) noexcept {
+  observer_.setRemoteCliExecutor(executor, context);
+}
+
+bool MOBridge::copyRemoteCliChannelSecret(uint8_t* secret, size_t capacity,
+                                          size_t& length) const noexcept {
+  return observer_.copyRemoteCliChannelSecret(secret, capacity, length);
+}
+
+bool MOBridge::handleRemoteCli(uint32_t senderTimestamp, const char* localName,
+                               const char* channelText) noexcept {
+  return observer_.handleRemoteCli(senderTimestamp, localName, channelText);
+}
+
 void MOBridge::setStatusSnapshot(
     const StatusSnapshot& status) noexcept {
   MOMQTT::StatusData mqtt_status{

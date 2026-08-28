@@ -4,6 +4,7 @@
 #include "MOAlertChannel.h"
 #include "MOCli.h"
 #include "MOMQTT.h"
+#include "MORemoteCli.h"
 #include "MOWatchdog.h"
 #include "MOWifi.h"
 
@@ -15,6 +16,7 @@
 class MO {
  public:
   using AlertSender = MOAlertChannel::Sender;
+  using RemoteCliExecutor = MORemoteCli::Executor;
   static constexpr size_t kRxQueueCapacity = 8;
   static constexpr size_t kTxQueueCapacity = 4;
   static constexpr size_t kMaxRawPacketSize = 256;
@@ -50,6 +52,11 @@ class MO {
   void setObserverIdentity(std::string origin, std::string originId);
   void setStatusSnapshot(const MOMQTT::StatusData& status);
   void setAlertSender(AlertSender sender, void* context) noexcept;
+  void setRemoteCliExecutor(RemoteCliExecutor executor, void* context) noexcept;
+  bool copyRemoteCliChannelSecret(uint8_t* secret, size_t capacity,
+                                  size_t& length) const noexcept;
+  bool handleRemoteCli(uint32_t senderTimestamp, const char* localName,
+                       const char* channelText) noexcept;
 
  private:
   struct RxEvent {
@@ -97,6 +104,7 @@ class MO {
   MOMQTT mqtt_;
   MOAlertChannel alertChannel_;
   MOWatchdog watchdog_;
+  MORemoteCli remoteCli_;
   MOCli cli_;
 
   std::array<RxEvent, kRxQueueCapacity> rxQueue_{};

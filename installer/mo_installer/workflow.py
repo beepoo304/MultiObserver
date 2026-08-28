@@ -12,6 +12,7 @@ from .common import (
 )
 from .patches import (
     patch_alert_channel_bridge,
+    patch_remote_cli_bridge,
     patch_main,
     patch_mymesh_cpp,
     patch_mymesh_h,
@@ -50,6 +51,7 @@ def build_plan(root: Path, source_root: Path) -> tuple[str, dict[Path, str]]:
         mymesh_cpp = patch_mymesh_cpp(mymesh_cpp)
 
     mymesh_h, mymesh_cpp = patch_alert_channel_bridge(mymesh_h, mymesh_cpp)
+    mymesh_h, mymesh_cpp = patch_remote_cli_bridge(mymesh_h, mymesh_cpp)
 
     mymesh_cpp = patch_status_sampling(mymesh_cpp)
     mymesh_cpp = patch_rx_metadata(mymesh_cpp)

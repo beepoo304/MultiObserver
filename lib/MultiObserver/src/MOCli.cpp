@@ -59,7 +59,28 @@ bool MOCli::handleCommand(uint32_t senderTimestamp, const char* command,
     return handleChannel(input, reply);
   }
 
+  if (input == "get rcli.status" || startsWith(input, "set rcli.")) {
+    return handleRemoteCli(input, reply);
+  }
+
   return false;
+}
+
+bool MOCli::handleRemoteCli(std::string_view command, char* reply) noexcept {
+  if (command == "get rcli.status") {
+    const char* status = !config_.etap2().remoteCliEnabled()
+                             ? "RCLI OFF"
+                             : (channel_.ready() ? "RCLI READY"
+                                                 : "RCLI CHANNEL NOT READY");
+    return copyReply(reply, status);
+  }
+
+  std::string_view key;
+  std::string_view value;
+  if (!splitSet(command, key, value) || !value.empty()) return false;
+  if (key != "rcli.on" && key != "rcli.off") return false;
+  config_.etap2().setRemoteCliEnabled(key == "rcli.on");
+  return copyReply(reply, config_.etap2().save() ? "OK" : "ERR");
 }
 
 bool MOCli::handleWatchdog(std::string_view command, char* reply) noexcept {
