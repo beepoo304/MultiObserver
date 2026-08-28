@@ -158,6 +158,35 @@ AC and WDG-log text uses local repeater time. The default build uses automatic
 CET/CEST daylight-saving rules. MeshCore packet epochs and MQTT timestamps
 remain UTC.
 
+## Remote CLI over a private channel
+
+Remote CLI reuses the AlertChannel key and is disabled by default.
+
+| Command | Reply | Description |
+| --- | --- | --- |
+| `get rcli.status` | RCLI status | Show `RCLI OFF`, `RCLI READY` or `RCLI CHANNEL NOT READY`. |
+| `set rcli.on` | `OK` / `ERR` | Persistently enable commands received through the private channel. |
+| `set rcli.off` | `OK` / `ERR` | Persistently disable remote commands. |
+
+Configure the private channel first, then enable Remote CLI from the serial
+console:
+
+```text
+set channel.key <private-channel-key>
+set channel.on
+set rcli.on
+```
+
+Send a normal CLI command as the complete private-channel message, for example
+`get status`, `get wifi.status` or `restart.mqtt1`. MultiObserver decrypts only
+the configured channel, calls the repeater's existing CLI handler and submits
+one reply to MeshCore's native outbound queue. It does not maintain another
+command table or TX queue.
+
+Anyone who knows the channel key can execute the same CLI, including commands
+that change configuration or restart the device. Use a dedicated secret
+channel and do not share its key.
+
 ## Recommended first configuration
 
 Use placeholders until entering the commands on your own trusted device. Do
@@ -185,6 +214,7 @@ set mqtt.iata ABC
 
 set channel.key 00112233445566778899AABBCCDDEEFF
 set channel.on
+set rcli.on
 
 set wdg.grace 120
 set wdg.on
@@ -198,6 +228,7 @@ get mqtt1.status
 get mqtt2.status
 get mqtt.iata
 get channel.status
+get rcli.status
 get wdg.grace
 get wdg.status
 get wdg.log
@@ -217,4 +248,5 @@ real private-channel secret.
 | IATA | 2 |
 | WDG | 8 |
 | AlertChannel | 6 |
-| **Total** | **41** |
+| Remote CLI | 3 |
+| **Total** | **44** |

@@ -43,6 +43,8 @@ adapter between the repeater application and the MultiObserver library.
   bounded recovery actions and loop-safe post-reboot silent monitoring.
 - An encrypted private AlertChannel that uses MeshCore's native outbound queue
   for startup, outage and recovery notifications.
+- Optional Remote CLI access through that private channel, backed by the
+  repeater's existing command handler and outbound queue.
 
 ## Current status
 
@@ -63,6 +65,7 @@ Implemented runtime mechanisms include:
 - staged Wi-Fi, MQTT1 and MQTT2 supervision with one-shot reboot attribution
 - a current-day watchdog event log with the last five entries available by CLI
 - 128-bit and 256-bit private MeshCore AlertChannel keys
+- private-channel Remote CLI without a duplicate parser or radio queue
 
 Integration architecture:
 
@@ -481,6 +484,26 @@ AC intentionally does not know whether the radio later transmitted the packet.
 There is no AC retry, delivery ACK or parallel queue. This prevents an alert
 failure from creating a second watchdog/reboot loop and keeps MultiObserver a
 thin application layer over MeshCore.
+
+### Remote CLI over LoRa
+
+Remote CLI uses the configured AlertChannel key and is off by default:
+
+```text
+set rcli.on
+get rcli.status
+set rcli.off
+```
+
+When `RCLI READY` is shown, send any normal repeater or MultiObserver CLI
+command as a message on that private channel, for example `get status` or
+`get wifi.status`. The existing MeshCore command handler creates one reply,
+which is returned through the native outbound queue. MultiObserver adds no
+second command table, response queue or retransmission mechanism.
+
+The channel key is the authorization boundary. Every person who has it can run
+configuration-changing and restart commands, so use a dedicated secret
+channel.
 
 ## EastMesh mechanism reference
 
