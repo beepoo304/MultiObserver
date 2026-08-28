@@ -4,7 +4,7 @@ This document is the compact command reference for the MultiObserver commands
 implemented by `MOCli`. It covers MultiObserver only; the upstream MeshCore
 repeater may provide additional commands of its own.
 
-The reference applies to MultiObserver v0.2.x and contains 41 commands.
+The reference applies to MultiObserver v0.3.x and contains 44 commands.
 
 ## Opening the CLI
 
