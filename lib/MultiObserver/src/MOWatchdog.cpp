@@ -35,18 +35,6 @@ void MOWatchdog::loop() {
       }
     }
   }
-  if (rebootScheduled_ && elapsed(now, rebootAtMs_)) {
-    logEvent("reboot");
-    if (prefs_.markWatchdogReboot()) {
-      Serial.println("[MO][WDG] reboot");
-      delay(20);
-      ESP.restart();
-    }
-    rebootScheduled_ = false;
-    rebootService_ = Service::None;
-    logEvent("reboot_marker_error");
-  }
-
   if (phase_ == Phase::Grace) {
     const uint32_t graceMs = static_cast<uint32_t>(prefs_.graceSeconds()) * 1000U;
     if (elapsed(now, graceStartedMs_ + graceMs)) finishGrace(now);
@@ -57,6 +45,25 @@ void MOWatchdog::loop() {
     return;
   }
   runNormal(now);
+  if (rebootScheduled_ && elapsed(now, rebootAtMs_)) {
+    // Recheck all owners before committing the reboot. One recovered broker
+    // cannot cancel a reboot still needed by another service.
+    if (wifi_.healthy()) cancelReboot(Service::Wifi);
+    if (!mqttSupervised(MOMQTT::BrokerId::Mqtt1) || mqttHealthy(MOMQTT::BrokerId::Mqtt1))
+      cancelReboot(Service::Mqtt1);
+    if (!mqttSupervised(MOMQTT::BrokerId::Mqtt2) || mqttHealthy(MOMQTT::BrokerId::Mqtt2))
+      cancelReboot(Service::Mqtt2);
+    if (!rebootScheduled_) return;
+    logEvent("reboot");
+    if (!prefs_.markWatchdogReboot()) {
+      // A full/damaged filesystem must not veto the recovery action.
+      Serial.println("[MO][WDG] reboot marker failed; rebooting anyway");
+      logEvent("reboot_marker_error");
+    }
+    Serial.println("[MO][WDG] reboot");
+    delay(20);
+    ESP.restart();
+  }
 }
 
 void MOWatchdog::setAlertSink(AlertSink sink, void* context) noexcept {
@@ -67,11 +74,12 @@ void MOWatchdog::setAlertSink(AlertSink sink, void* context) noexcept {
 void MOWatchdog::restartGrace() noexcept {
   phase_ = Phase::Grace;
   rebootScheduled_ = false;
-  rebootService_ = Service::None;
+  rebootServices_ = 0;
   graceStartedMs_ = millis();
   nextWifiCheckMs_ = graceStartedMs_;
   nextMqttCheckMs_ = graceStartedMs_;
   nextSilentCheckMs_ = graceStartedMs_;
+  silentStartedMs_ = 0;
   nextLogRotationCheckMs_ = graceStartedMs_;
   logDayId_ = -1;
   silentWifi_ = false;
@@ -86,7 +94,7 @@ void MOWatchdog::setEnabled(bool enabled) noexcept {
   prefs_.setWatchdogEnabled(enabled);
   if (!enabled) {
     rebootScheduled_ = false;
-    rebootService_ = Service::None;
+    rebootServices_ = 0;
     clearTrack(wifiTrack_);
     clearTrack(mqtt1Track_);
     clearTrack(mqtt2Track_);
@@ -105,6 +113,7 @@ void MOWatchdog::finishGrace(uint32_t now) {
   bootAfterWatchdog_ = false;
   if (shouldEnterSilent) {
     phase_ = Phase::Silent;
+    silentStartedMs_ = now;
     nextSilentCheckMs_ = now + kSilentCheckMs;
     silentWifi_ = !wifi_.healthy();
     silentMqtt1_ = !silentWifi_ && mqttSupervised(MOMQTT::BrokerId::Mqtt1) &&
@@ -137,6 +146,18 @@ void MOWatchdog::runNormal(uint32_t now) {
 
 void MOWatchdog::runSilent(uint32_t now) {
   nextSilentCheckMs_ = now + kSilentCheckMs;
+  if (now - silentStartedMs_ >= kSilentCooldownMs) {
+    logEvent("silent.retry");
+    Serial.println("[MO][WDG] cooldown expired: recovery rearmed");
+    phase_ = Phase::Normal;
+    silentWifi_ = silentMqtt1_ = silentMqtt2_ = false;
+    clearTrack(wifiTrack_);
+    clearTrack(mqtt1Track_);
+    clearTrack(mqtt2Track_);
+    nextWifiCheckMs_ = now;
+    nextMqttCheckMs_ = now;
+    return;
+  }
   if (silentWifi_) {
     if (!wifi_.healthy()) return;
     char duration[20]{};
@@ -301,19 +322,23 @@ void MOWatchdog::handleMqttDown(MOMQTT::BrokerId broker, ServiceTrack& track,
 void MOWatchdog::clearTrack(ServiceTrack& track) noexcept { track = {}; }
 
 void MOWatchdog::scheduleReboot(Service service, uint32_t now) {
-  if (rebootScheduled_) return;
+  if (service == Service::None) return;
+  const uint8_t bit = 1U << static_cast<uint8_t>(service);
+  if (rebootServices_ & bit) return;
+  rebootServices_ |= bit;
+  if (!rebootScheduled_) rebootAtMs_ = now + kRebootDelayMs;
   rebootScheduled_ = true;
-  rebootService_ = service;
-  rebootAtMs_ = now + kRebootDelayMs;
   char event[48]{};
   std::snprintf(event, sizeof(event), "reboot.%s", serviceName(service));
   logEvent(event);
 }
 
 void MOWatchdog::cancelReboot(Service service) {
-  if (!rebootScheduled_ || rebootService_ != service) return;
+  const uint8_t bit = 1U << static_cast<uint8_t>(service);
+  if (!rebootScheduled_ || !(rebootServices_ & bit)) return;
+  rebootServices_ &= ~bit;
+  if (rebootServices_ != 0) return;
   rebootScheduled_ = false;
-  rebootService_ = Service::None;
   logEvent("reboot.cancel");
 }
 

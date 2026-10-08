@@ -45,6 +45,9 @@ class MOWatchdog {
   static constexpr uint32_t kWifiCheckMs = 5'000;
   static constexpr uint32_t kMqttCheckMs = 15'000;
   static constexpr uint32_t kSilentCheckMs = 60'000;
+  // Bound post-reboot cooling down; a failed broker must never permanently
+  // disable recovery for Wi-Fi or the other broker.
+  static constexpr uint32_t kSilentCooldownMs = 15 * 60'000;
   static constexpr uint32_t kWifiFirstMs = 3 * 60'000;
   static constexpr uint32_t kWifiSecondMs = 5 * 60'000;
   static constexpr uint32_t kWifiThirdMs = 30 * 60'000;
@@ -85,7 +88,7 @@ class MOWatchdog {
   Phase phase_{Phase::Grace};
   bool bootAfterWatchdog_{false};
   bool rebootScheduled_{false};
-  Service rebootService_{Service::None};
+  uint8_t rebootServices_{0};
   bool silentWifi_{false};
   bool silentMqtt1_{false};
   bool silentMqtt2_{false};
@@ -94,6 +97,7 @@ class MOWatchdog {
   uint32_t nextWifiCheckMs_{0};
   uint32_t nextMqttCheckMs_{0};
   uint32_t nextSilentCheckMs_{0};
+  uint32_t silentStartedMs_{0};
   uint32_t nextLogRotationCheckMs_{0};
   int32_t logDayId_{-1};
   ServiceTrack wifiTrack_{};

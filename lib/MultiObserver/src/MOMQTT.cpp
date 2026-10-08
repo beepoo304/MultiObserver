@@ -47,6 +47,16 @@ MOMQTT::~MOMQTT() {
 void MOMQTT::begin() {
   if (running_) return;
   brokers_.fill({});
+  eventQueue_ = xQueueCreate(16, sizeof(PendingEvent));
+  if (eventQueue_ == nullptr) {
+    Serial.println("[MO][MQTT] event queue allocation failed");
+    return;
+  }
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
+    eventContexts_[index(broker)] = {this, broker, 0};
+    runtime(brokers_, broker).state = State::Disconnected;
+  }
+  eventOverflow_ = 0;
   running_ = true;
   Serial.println("[MO][MQTT1] runtime start");
   Serial.println("[MO][MQTT2] runtime start");
@@ -59,11 +69,17 @@ void MOMQTT::end() {
   }
   destroyBroker(BrokerId::Mqtt1);
   destroyBroker(BrokerId::Mqtt2);
+  vQueueDelete(eventQueue_);
+  eventQueue_ = nullptr;
   running_ = false;
 }
 
 void MOMQTT::loop() {
-  if (!running_) return;
+  if (!running_) {
+    begin();
+    if (!running_) return;
+  }
+  drainEvents();
   const uint32_t now = millis();
 
   if (!isNetworkReady()) {
@@ -88,10 +104,6 @@ void MOMQTT::loop() {
 
   // Keep peak TLS heap usage bounded: finish the current broker handshake
   // before starting the other one.
-  bool connectStarted = std::any_of(
-      brokers_.begin(), brokers_.end(), [](const BrokerRuntime& state) {
-        return state.client != nullptr && state.state == State::Connecting;
-      });
   for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     BrokerRuntime& state = runtime(brokers_, broker);
 
@@ -119,13 +131,23 @@ void MOMQTT::loop() {
       scheduleRetry(broker, now);
     }
 
+    // DISCONNECTED/ERROR do not destroy the ESP-MQTT handle. Auto reconnect
+    // is disabled, so retire it here (never inside its callback). Preserve
+    // the scheduled deadline/failure count to retain bounded backoff.
+    if (state.client != nullptr && state.reconnectPending &&
+        state.state != State::Connected) {
+      const uint32_t retryAt = state.nextConnectAttemptMs;
+      destroyBroker(broker);
+      state.state = State::Backoff;
+      state.reconnectPending = true;
+      state.nextConnectAttemptMs = retryAt;
+    }
+    const bool connectStarted = std::any_of(
+        brokers_.begin(), brokers_.end(), [](const BrokerRuntime& other) {
+          return other.client != nullptr && other.state == State::Connecting;
+        });
     if (state.client == nullptr && !connectStarted) {
-      const State previous = state.state;
       ensureBroker(broker, now);
-      if (previous != State::Connected && state.client != nullptr &&
-          state.state == State::Connecting) {
-        connectStarted = true;
-      }
     }
   }
   if (statusSnapshot_.valid &&
@@ -362,24 +384,49 @@ void MOMQTT::onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
   (void)eventId;
   if (handlerArg == nullptr || eventData == nullptr) return;
 
-  auto* self = static_cast<MOMQTT*>(handlerArg);
+  auto* context = static_cast<EventContext*>(handlerArg);
+  auto* self = context->owner;
   auto* event = static_cast<esp_mqtt_event_handle_t>(eventData);
-
-  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
-    if (self->runtime(self->brokers_, broker).client == event->client) {
-      self->handleMqttEvent(broker, event);
-      return;
-    }
+  if (event->event_id != MQTT_EVENT_CONNECTED &&
+      event->event_id != MQTT_EVENT_DISCONNECTED &&
+      event->event_id != MQTT_EVENT_ERROR &&
+      event->event_id != MQTT_EVENT_PUBLISHED &&
+      event->event_id != MQTT_EVENT_BEFORE_CONNECT) return;
+  PendingEvent copy{};
+  copy.broker = context->broker;
+  copy.generation = context->generation;
+  copy.timestampMs = millis();
+  copy.id = event->event_id;
+  copy.hasError = event->event_id == MQTT_EVENT_ERROR && event->error_handle;
+  if (copy.hasError) copy.error = *event->error_handle;
+  if (xQueueSend(self->eventQueue_, &copy, 0) != pdTRUE) {
+    self->eventOverflow_.fetch_or(1U << index(copy.broker));
   }
 }
 
-void MOMQTT::handleMqttEvent(BrokerId broker,
-                             esp_mqtt_event_handle_t event) {
+void MOMQTT::drainEvents() {
+  const uint32_t overflow = eventOverflow_.exchange(0);
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
+    if ((overflow & (1U << index(broker))) == 0) continue;
+    Serial.printf("[MO][%s] event overflow: recover client\n", brokerName(broker));
+    destroyBroker(broker);
+    scheduleRetry(broker, millis());
+  }
+  PendingEvent event{};
+  while (xQueueReceive(eventQueue_, &event, 0) == pdTRUE) {
+    if (event.generation != eventContexts_[index(event.broker)].generation ||
+        runtime(brokers_, event.broker).client == nullptr) continue;
+    handleMqttEvent(event);
+  }
+}
+
+void MOMQTT::handleMqttEvent(const PendingEvent& event) {
+  const BrokerId broker = event.broker;
   BrokerRuntime& state = runtime(brokers_, broker);
-  const uint32_t now = millis();
+  const uint32_t now = event.timestampMs;
   const uint32_t connectedFor =
       state.connectedSinceMs == 0 ? 0 : now - state.connectedSinceMs;
-  switch (event->event_id) {
+  switch (event.id) {
     case MQTT_EVENT_CONNECTED:
       state.state = State::Connected;
       state.reconnectFailures = 0;
@@ -413,21 +460,21 @@ void MOMQTT::handleMqttEvent(BrokerId broker,
       scheduleRetry(broker, now);
       break;
     case MQTT_EVENT_ERROR:
-      state.lastError = event->error_handle != nullptr
-                            ? event->error_handle->esp_tls_last_esp_err
+      state.lastError = event.hasError
+                            ? event.error.esp_tls_last_esp_err
                             : ESP_FAIL;
-      if (event->error_handle != nullptr) {
+      if (event.hasError) {
         Serial.printf(
             "[MO][%s] error t=%lu type=%d tls_esp=0x%x tls_stack=0x%x "
             "cert_flags=0x%x sock_errno=%d conn_refused=%d wifi_code=%d "
             "rssi=%d connected_ms=%lu\n",
             brokerName(broker), static_cast<unsigned long>(now),
-            event->error_handle->error_type,
-            event->error_handle->esp_tls_last_esp_err,
-            event->error_handle->esp_tls_stack_err,
-            event->error_handle->esp_tls_cert_verify_flags,
-            event->error_handle->esp_transport_sock_errno,
-            event->error_handle->connect_return_code,
+            event.error.error_type,
+            event.error.esp_tls_last_esp_err,
+            event.error.esp_tls_stack_err,
+            event.error.esp_tls_cert_verify_flags,
+            event.error.esp_transport_sock_errno,
+            event.error.connect_return_code,
             static_cast<int>(WiFi.status()), WiFi.RSSI(),
             static_cast<unsigned long>(connectedFor));
       } else {
@@ -567,7 +614,7 @@ bool MOMQTT::startBroker(BrokerId broker, uint32_t now) {
   }
 
   esp_err_t rc = esp_mqtt_client_register_event(
-      client, MQTT_EVENT_ANY, &MOMQTT::onMqttEvent, this);
+      client, MQTT_EVENT_ANY, &MOMQTT::onMqttEvent, &eventContexts_[index(broker)]);
   if (rc != ESP_OK) {
     esp_mqtt_client_destroy(client);
     state.lastError = rc;
@@ -600,6 +647,9 @@ void MOMQTT::destroyBroker(BrokerId broker) {
     esp_mqtt_client_stop(state.client);
     esp_mqtt_client_destroy(state.client);
   }
+  // stop/destroy join the MQTT task before its callback context is changed.
+  // Events already queued by that client must not affect its replacement.
+  ++eventContexts_[index(broker)].generation;
   clearRuntime(broker);
 }
 

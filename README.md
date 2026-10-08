@@ -386,8 +386,9 @@ supervised independently and escalate after 3, 5, 15 and 30 minutes. The last
 stage queues an encrypted alert and schedules one ESP reboot three minutes
 later. A persistent one-shot marker distinguishes that reboot from manual
 restart or power loss. If the failed service is still down after the next
-grace period, WDG enters silent mode and checks every minute without
-further restarts or reboot loops. A `*.restore` alert is sent only after
+grace period, WDG enters a bounded 15-minute cooldown and checks every minute.
+Normal recovery is rearmed after that cooldown even if a service is still down;
+MQTT's ordinary connection retries continue throughout. A `*.restore` alert is sent after
 recovery from silent mode; its duration starts at entry into silent mode.
 
 #### WDG escalation sequence
@@ -416,20 +417,51 @@ while Wi-Fi is healthy. MQTT1 and MQTT2 have separate state machines:
 | Monitor for another 30 minutes | Queue `Restart.ESP.mqtt1.down` or `Restart.ESP.mqtt2.down`. |
 | Wait another 3 minutes | Persist the one-shot WDG marker and reboot the ESP once. |
 
-Only one reboot can be pending globally. Disabling WDG or running
+Only one reboot timer can be pending globally, but each failing service retains
+its own request. Recovery of one broker does not cancel another broker's request.
+Failure to write the reboot marker is logged and does not prevent reboot.
+Disabling WDG or running
 `restart.wdg` cancels a pending reboot and clears all escalation states;
 `restart.wdg` then starts a new grace period without rebooting the ESP.
 A successful recovery during the final three-minute delay also cancels the
-pending reboot owned by that service.
+that service's request. The timer is canceled only when no requests remain.
 
 On boot, WDG consumes and deletes its reboot marker immediately. After grace,
 `AlertChannel newStart` is queued. If a supervised service is still down and
 that consumed marker identified this as the WDG-requested reboot, WDG enters
-silent mode. Silent mode performs no service restart and schedules no further
-ESP reboot. It checks every minute. Once a failed service recovers, AC
+silent mode. Silent mode performs no service restart or ESP reboot during a
+15-minute cooldown. It checks every minute and then rearms normal escalation,
+so an unavailable broker cannot disable recovery indefinitely. Once a failed service recovers, AC
 queues `wifi.restore`, `mqtt1.restore` or `mqtt2.restore` with a duration
 measured only from entry into silent mode. Normal/manual boot and power loss do
 not activate silent mode.
+
+#### Connection recovery fix (2026-10-08)
+
+Disconnected/error MQTT clients are now stopped and destroyed by the main loop
+before a new client is created at the scheduled retry deadline. The previous
+code left the handle alive while requiring a null handle to reconnect.
+Retry backoff remains 10 seconds up to 5 minutes. Broker handshakes remain
+serialized to limit TLS memory use.
+
+MQTT callbacks only enqueue bounded event copies. The main loop owns state
+changes, publication and client destruction. This also avoids cross-client MQTT
+locks when both brokers connect together. Events from retired clients are ignored;
+queue overflow triggers controlled recovery of the affected client.
+
+Runtime regression tests compile the actual `MOMQTT.cpp` and `MOWatchdog.cpp`
+against fake MQTT, Wi-Fi, storage and time: `python tests/runtime/run.py`.
+Set `CXX` or pass `--compiler`; Zig is also supported. These tests exercise
+reconnection, duplicate error events, timeouts, both brokers, Wi-Fi/NTP loss,
+memory gating, stale callbacks, queue overflow, timer rollover, reboot ownership,
+storage failure and bounded post-reboot cooldown. They do not replace device tests.
+
+For an existing Heltec V3 installation, update **firmware only** using the
+unmerged `firmware.bin` through `start ota` and `http://192.168.4.1/update`.
+Select **Firmware**, never **Filesystem**. Do not erase flash, upload a new
+filesystem, provision new identity files or change the partition table.
+This fix does not change preference formats or the existing partition layout.
+Heltec V3 uses ESP32 Wi-Fi OTA, not Nordic Bluetooth DFU ZIP packages.
 
 ### Private AlertChannel
 

@@ -12,6 +12,8 @@ firmware/
 # Build / generated files
 build/
 dist/
+.audit-tools/
+runtime-test.log
 *.o
 *.obj
 *.a

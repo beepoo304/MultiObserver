@@ -4,8 +4,11 @@
 
 #include <Arduino.h>
 #include <mqtt_client.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/queue.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -145,10 +148,27 @@ class MOMQTT {
     uint32_t lastPublishConfirmedMs{0};
   };
 
+  // ESP-MQTT callbacks run in separate tasks. Only loop() owns broker state,
+  // publication and client lifetime; callbacks copy events into this queue.
+  struct EventContext {
+    MOMQTT* owner{nullptr};
+    BrokerId broker{BrokerId::Mqtt1};
+    uint32_t generation{0};
+  };
+  struct PendingEvent {
+    BrokerId broker;
+    uint32_t generation;
+    uint32_t timestampMs;
+    int32_t id;
+    bool hasError;
+    esp_mqtt_error_codes_t error;
+  };
+
   static void onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
                           int32_t eventId, void* eventData);
 
-  void handleMqttEvent(BrokerId broker, esp_mqtt_event_handle_t event);
+  void drainEvents();
+  void handleMqttEvent(const PendingEvent& event);
   void ensureBroker(BrokerId broker, uint32_t now);
   bool startBroker(BrokerId broker, uint32_t now);
   void destroyBroker(BrokerId broker);
@@ -199,6 +219,9 @@ class MOMQTT {
   MOMQTTPrefs& prefs_;
   MOWifi& wifi_;
   std::array<BrokerRuntime, 2> brokers_{};
+  std::array<EventContext, 2> eventContexts_{};
+  QueueHandle_t eventQueue_{nullptr};
+  std::atomic<uint32_t> eventOverflow_{0};
   struct StoredStatus {
     std::string status;
     std::string origin;
