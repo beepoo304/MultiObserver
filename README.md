@@ -463,6 +463,10 @@ filesystem, provision new identity files or change the partition table.
 This fix does not change preference formats or the existing partition layout.
 Heltec V3 uses ESP32 Wi-Fi OTA, not Nordic Bluetooth DFU ZIP packages.
 
+Observer status identifies the client as `github.com/beepoo304/MultiObserver`.
+This is a telemetry label, not the repeater's saved name or public identity.
+Whether the address is clickable depends on the broker's web interface.
+
 ### Private AlertChannel
 
 Create a private channel in a MeshCore client and copy its secret key. Standard

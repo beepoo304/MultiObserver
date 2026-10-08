@@ -297,7 +297,7 @@ def patch_mymesh_cpp(text: str) -> str:
       .model = board.getManufacturerName(),
       .firmwareVersion = FIRMWARE_VERSION,
       .radio = {},
-      .clientVersion = "MultiObserver",
+      .clientVersion = "github.com/beepoo304/MultiObserver",
       .repeat = _prefs.disable_fwd ? "off" : "on",
       .batteryMv = mo_battery_mv,
       .uptimeSecs = static_cast<uint32_t>(uptime_millis / 1000),
@@ -522,6 +522,10 @@ def patch_tx_led_mymesh(text: str) -> str:
     return text
 
 def patch_status_sampling(text: str) -> str:
+    text = text.replace(
+        '.clientVersion = "MultiObserver",',
+        '.clientVersion = "github.com/beepoo304/MultiObserver",',
+    )
     if "static unsigned long mo_battery_last_ms = 0;" in text:
         return text
 
@@ -552,7 +556,7 @@ def patch_status_sampling(text: str) -> str:
         .model = board.getManufacturerName(),
         .firmwareVersion = FIRMWARE_VERSION,
         .radio = {},
-        .clientVersion = "MultiObserver",
+        .clientVersion = "github.com/beepoo304/MultiObserver",
         .repeat = _prefs.disable_fwd ? "off" : "on",
         .batteryMv = mo_battery_mv,
         .uptimeSecs = static_cast<uint32_t>(uptime_millis / 1000),
