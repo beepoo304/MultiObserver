@@ -483,6 +483,16 @@ secret. MultiObserver never publishes it to serial diagnostics.
 | `set channel.key <32-or-64-hex>` | Save a private MeshCore channel key. |
 | `test.channel` | Queue `test alertchannel`, time and concise WDG state (maximum 130 characters). |
 
+> **IMPORTANT: `set channel.on` DOES NOT ENABLE COMMAND REPLIES ON THE CHANNEL.**
+> **ALSO RUN `set rcli.on` TO ENABLE REMOTE CLI COMMANDS.**
+>
+> Check `get channel.status` for `CHANNEL READY` and `get rcli.status` for
+> `RCLI READY`. A successful `test.channel` only tests outgoing alerts; it
+> does not confirm that incoming channel commands are enabled. Remote CLI
+> is off by default on a clean installation. Once enabled, it stays enabled
+> across restarts and firmware-only updates that preserve the filesystem.
+> LoRa channel commands work without Wi-Fi or MQTT.
+
 After each grace period AlertChannel attempts to queue `AlertChannel newStart`
 with repeater time. Alert messages are encrypted as MeshCore group datagrams
 and handed directly to the repeater's existing scoped outbound queue.
