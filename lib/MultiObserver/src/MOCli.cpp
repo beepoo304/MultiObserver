@@ -95,10 +95,6 @@ bool MOCli::handleWatchdog(std::string_view command, char* reply) noexcept {
                   static_cast<unsigned>(config_.etap2().graceSeconds()));
     return copyReply(reply, buffer);
   }
-  if (command == "get wdg.log") {
-    char buffer[kReplyCapacity]{};
-    return watchdog_.formatLog(buffer, sizeof(buffer)) && copyReply(reply, buffer);
-  }
   if (command == "restart.wdg") {
     watchdog_.restartGrace();
     return copyReply(reply, "OK");
@@ -120,9 +116,6 @@ bool MOCli::handleWatchdog(std::string_view command, char* reply) noexcept {
         !config_.etap2().save()) return copyReply(reply, "ERR");
     watchdog_.restartGrace();
     return copyReply(reply, "OK");
-  }
-  if (key == "wdg.log" && value == "1") {
-    return copyReply(reply, watchdog_.clearLog() ? "CLEAR" : "ERR");
   }
   return false;
 }

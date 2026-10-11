@@ -39,9 +39,7 @@ adapter between the repeater application and the MultiObserver library.
   packets.
 - Heltec V3 integration: Wi-Fi IP shown on the OLED, an EastMesh-style cached
   battery measurement, and a non-blocking white LED pulse for packet activity.
-- A staged Wi-Fi/MQTT watchdog with a configurable startup grace period,
-  bounded recovery actions and loop-safe post-reboot silent monitoring.
-- An encrypted private AlertChannel that uses MeshCore's native outbound queue
+- A compact Wi-Fi/MQTT watchdog with a configurable startup grace period and\r?\n  recovery timings that avoid repeated ESP reboot loops.\r?\n- An encrypted private AlertChannel that uses MeshCore's native outbound queue
   for startup, outage and recovery notifications.
 - Optional Remote CLI access through that private channel, backed by the
   repeater's existing command handler and outbound queue.
@@ -63,7 +61,6 @@ Implemented runtime mechanisms include:
 - non-blocking visible packet pulse on the Heltec V3 white GPIO35 LED
 - WiFi IP address on the Heltec OLED status screen
 - staged Wi-Fi, MQTT1 and MQTT2 supervision with one-shot reboot attribution
-- a current-day watchdog event log with the last five entries available by CLI
 - 128-bit and 256-bit private MeshCore AlertChannel keys
 - private-channel Remote CLI without a duplicate parser or radio queue
 
@@ -357,85 +354,37 @@ exactly three uppercase letters.
 ### Watchdog
 
 The watchdog starts after a configurable 120-300 second grace period. Wi-Fi
-health requires a connected station, a non-zero local address and a non-zero
-default gateway; no Internet probe is generated. Enabled, fully configured
-MQTT brokers are supervised only while Wi-Fi is healthy. MQTT health requires
-both an active session and fresh acknowledgement of a periodic status publish.
+health is local: connected station, assigned address and gateway. MQTT status
+uses the active broker connection; delayed publish acknowledgements do not
+falsely show a connected broker as down.
 
 | Command | Description |
 | --- | --- |
-| `get wdg.status` | Show WDG mode, phase, service health and pending reboot state. |
+| `get wdg.status` | Show WDG mode, phase, Wi-Fi/MQTT health and pending reboot state. |
 | `set wdg.on` | Enable WDG persistently and start a fresh grace period. |
-| `set wdg.off` | Disable WDG, cancel escalation and cancel a pending WDG reboot. |
+| `set wdg.off` | Disable WDG, cancel recovery and a pending WDG reboot. |
 | `get wdg.grace` | Show the saved startup grace period in seconds. |
-| `set wdg.grace <120-300>` | Save the grace period and restart WDG grace. |
-| `restart.wdg` | Reset only the WDG state machine and grace timer; do not reboot the ESP. |
-| `get wdg.log` | Return the last five short events from the current local repeater day. |
-| `set wdg.log 1` | Clear the WDG event log. |
+| `set wdg.grace <120-300>` | Save a valid grace period and restart WDG grace. |
+| `restart.wdg` | Reset the WDG state machine and grace timer without rebooting the ESP. |
 
-The persistent WDG log is deliberately small: it keeps at most the five most
-recent short events and their local repeater times. Events may include WDG
-startup, a service becoming unavailable or recovering, staged restarts,
-silent-mode transitions and reboot scheduling/cancellation. When the local
-calendar day changes, the previous day's entries are discarded automatically;
-`set wdg.log 1` clears them immediately. If the clock is not yet valid, WDG
-continues operating but does not invent a timestamped log entry.
+Wi-Fi is checked every 5 seconds. If it remains unhealthy for 30 seconds, WDG
+restarts Wi-Fi once; the Wi-Fi manager then retries every 3 minutes. A Wi-Fi
+outage alone never reboots the ESP.
 
-Wi-Fi recovery escalates after 3, 5 and 30 minutes. MQTT1 and MQTT2 are
-supervised independently and escalate after 3, 5, 15 and 30 minutes. The last
-stage queues an encrypted alert and schedules one ESP reboot three minutes
-later. A persistent one-shot marker distinguishes that reboot from manual
-restart or power loss. If the failed service is still down after the next
-grace period, WDG enters a bounded 15-minute cooldown and checks every minute.
-Normal recovery is rearmed after that cooldown even if a service is still down;
-MQTT's ordinary connection retries continue throughout. A `*.restore` alert is sent after
-recovery from silent mode; its duration starts at entry into silent mode.
+MQTT1 and MQTT2 are handled independently while Wi-Fi is healthy. When a broker
+disconnects, WDG restarts only that MQTT client and makes up to three
+connection attempts, spaced 3 minutes apart. If all three fail, it queues
+`ESP restart.mqtt1` or `ESP restart.mqtt2`, waits 30 seconds, then reboots once.
+The affected broker mask is saved before reboot so a failed recovery cannot
+cause a reboot loop. After the startup grace period, a broker still down reports
+`mqtt1.down` or `mqtt2.down` and retries every 5 minutes. When it reconnects,
+WDG queues one matching `mqtt1.restore` or `mqtt2.restore` alert, then returns
+that broker to the normal 3-minute retry interval. Recovery cancels only that
+broker's pending reboot request.
 
-#### WDG escalation sequence
-
-WDG always gives Wi-Fi priority. If Wi-Fi is down, MQTT1 and MQTT2 are treated
-as dependent services and their independent escalation timers do not run.
-Every successful recovery clears that service's current escalation state.
-
-Wi-Fi is checked every 5 seconds:
-
-| Consecutive stage | Action if Wi-Fi is still down |
-| --- | --- |
-| Monitor for 3 minutes | Call the existing MultiObserver Wi-Fi restart. |
-| Monitor for another 5 minutes | Restart Wi-Fi a second time. |
-| Monitor for another 30 minutes | Queue `Restart.ESP.wifi.down`. |
-| Wait another 3 minutes | Persist the one-shot WDG marker and reboot the ESP once. |
-
-Each enabled and correctly configured MQTT broker is checked every 15 seconds
-while Wi-Fi is healthy. MQTT1 and MQTT2 have separate state machines:
-
-| Consecutive stage | Action if that MQTT broker is still unhealthy |
-| --- | --- |
-| Monitor for 3 minutes | Restart that MQTT client. |
-| Monitor for another 5 minutes | Restart that MQTT client again. |
-| Monitor for another 15 minutes | Restart that MQTT client a third time. |
-| Monitor for another 30 minutes | Queue `Restart.ESP.mqtt1.down` or `Restart.ESP.mqtt2.down`. |
-| Wait another 3 minutes | Persist the one-shot WDG marker and reboot the ESP once. |
-
-Only one reboot timer can be pending globally, but each failing service retains
-its own request. Recovery of one broker does not cancel another broker's request.
-Failure to write the reboot marker is logged and does not prevent reboot.
-Disabling WDG or running
-`restart.wdg` cancels a pending reboot and clears all escalation states;
-`restart.wdg` then starts a new grace period without rebooting the ESP.
-A successful recovery during the final three-minute delay also cancels the
-that service's request. The timer is canceled only when no requests remain.
-
-On boot, WDG consumes and deletes its reboot marker immediately. After grace,
-`AlertChannel newStart` is queued. If a supervised service is still down and
-that consumed marker identified this as the WDG-requested reboot, WDG enters
-silent mode. Silent mode performs no service restart or ESP reboot during a
-15-minute cooldown. It checks every minute and then rearms normal escalation,
-so an unavailable broker cannot disable recovery indefinitely. Once a failed service recovers, AC
-queues `wifi.restore`, `mqtt1.restore` or `mqtt2.restore` with a duration
-measured only from entry into silent mode. Normal/manual boot and power loss do
-not activate silent mode.
-
+WDG keeps no persistent event log. `get wdg.status` reports MQTT `UP` or `DOWN`
+from the actual connection state, not from the age of the last publish
+acknowledgement.
 #### Connection recovery fix (2026-10-08)
 
 Disconnected/error MQTT clients are now stopped and destroyed by the main loop
@@ -463,10 +412,6 @@ filesystem, provision new identity files or change the partition table.
 This fix does not change preference formats or the existing partition layout.
 Heltec V3 uses ESP32 Wi-Fi OTA, not Nordic Bluetooth DFU ZIP packages.
 
-Observer status identifies the client as `github.com/beepoo304/MultiObserver`.
-This is a telemetry label, not the repeater's saved name or public identity.
-Whether the address is clickable depends on the broker's web interface.
-
 ### Private AlertChannel
 
 Create a private channel in a MeshCore client and copy its secret key. Standard
@@ -483,16 +428,6 @@ secret. MultiObserver never publishes it to serial diagnostics.
 | `set channel.key <32-or-64-hex>` | Save a private MeshCore channel key. |
 | `test.channel` | Queue `test alertchannel`, time and concise WDG state (maximum 130 characters). |
 
-> **IMPORTANT: `set channel.on` DOES NOT ENABLE COMMAND REPLIES ON THE CHANNEL.**
-> **ALSO RUN `set rcli.on` TO ENABLE REMOTE CLI COMMANDS.**
->
-> Check `get channel.status` for `CHANNEL READY` and `get rcli.status` for
-> `RCLI READY`. A successful `test.channel` only tests outgoing alerts; it
-> does not confirm that incoming channel commands are enabled. Remote CLI
-> is off by default on a clean installation. Once enabled, it stays enabled
-> across restarts and firmware-only updates that preserve the filesystem.
-> LoRa channel commands work without Wi-Fi or MQTT.
-
 After each grace period AlertChannel attempts to queue `AlertChannel newStart`
 with repeater time. Alert messages are encrypted as MeshCore group datagrams
 and handed directly to the repeater's existing scoped outbound queue.
@@ -504,7 +439,7 @@ the encrypted message. This is intentionally not reported as `SENT` or
 `DELIVERED`: actual airtime remains under MeshCore control and AlertChannel
 does not wait for a delivery acknowledgement.
 
-Human-readable AlertChannel and WDG-log timestamps use the local repeater time.
+Human-readable AlertChannel timestamps use the local repeater time.
 The default is Central European time with automatic CET/CEST daylight-saving
 changes. Override the POSIX timezone at build time with
 `-D MULTIOBSERVER_TZ=\"your-POSIX-TZ\"`. MeshCore packet epochs and MQTT
@@ -563,3 +498,6 @@ remain outside the current V1 scope.
 The Heltec fixes reproduce the observed EastMesh behavior without moving
 business logic into MeshCore core: the installer adds only verified
 application/build hooks, while `MOBridge` remains the thin adapter to MO.
+
+
+

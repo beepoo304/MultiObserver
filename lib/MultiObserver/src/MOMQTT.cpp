@@ -233,6 +233,14 @@ bool MOMQTT::configured(BrokerId broker) const noexcept {
   return isEnabled(prefs(prefs_, broker));
 }
 
+bool MOMQTT::canAttempt(BrokerId broker) const noexcept {
+  return configured(broker) && isNetworkReady();
+}
+
+void MOMQTT::setRetryInterval(BrokerId broker, uint32_t intervalMs) noexcept {
+  runtime(brokers_, broker).retryIntervalMs = intervalMs;
+}
+
 bool MOMQTT::publishingHealthy(BrokerId broker) const noexcept {
   const BrokerRuntime& state = runtime(brokers_, broker);
   if (state.state != State::Connected || state.connectedSinceMs == 0) return false;
@@ -505,10 +513,10 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
   if (!hasConnectHeadroom(broker)) {
     state.state = State::Backoff;
     state.reconnectPending = true;
-    state.nextConnectAttemptMs = now + kRetryBaseMs;
+    state.nextConnectAttemptMs = now + state.retryIntervalMs;
     Serial.printf("[MO][%s] deferred: insufficient heap retry_ms=%lu\n",
                   brokerName(broker),
-                  static_cast<unsigned long>(kRetryBaseMs));
+                  static_cast<unsigned long>(state.retryIntervalMs));
     return;
   }
 
@@ -662,7 +670,7 @@ void MOMQTT::scheduleRetry(BrokerId broker, uint32_t now) {
       std::min<uint32_t>(state.reconnectFailures + 1, 31);
   state.reconnectPending = true;
   state.state = State::Backoff;
-  const uint32_t delay = retryDelayMs(state.reconnectFailures);
+  const uint32_t delay = state.retryIntervalMs;
   state.nextConnectAttemptMs = now + delay;
   Serial.printf(
       "[MO][%s] backoff t=%lu retry_ms=%lu failures=%lu last_error=0x%x\n",
@@ -926,19 +934,6 @@ bool MOMQTT::buildStatusJson(const StatusData& s, char* buffer,
     return ok;
   };
 
-  const auto addNumber = [&](std::string_view key, auto value) {
-    char number[24]{};
-    const int written = std::snprintf(number, sizeof(number), "%ld",
-                                      static_cast<long>(value));
-    if (written < 0 || static_cast<size_t>(written) >= sizeof(number)) {
-      return false;
-    }
-    const bool ok = appendJsonLiteral(buffer, bufferSize, length, key, number,
-                                      comma);
-    if (ok) comma = true;
-    return ok;
-  };
-
   if (!addString("status", s.status) ||
       !addString("timestamp", s.timestamp) ||
       !addString("origin", s.origin) ||
@@ -1007,15 +1002,6 @@ const MOBrokerPrefs& MOMQTT::prefs(const MOMQTTPrefs& prefs,
 
 size_t MOMQTT::index(BrokerId broker) noexcept {
   return static_cast<size_t>(broker);
-}
-
-uint32_t MOMQTT::retryDelayMs(uint32_t failures) noexcept {
-  if (failures == 0) return kRetryBaseMs;
-  constexpr uint32_t kMaxShift = 5;
-  const uint32_t shift = std::min(failures - 1, kMaxShift);
-  const uint64_t delay = static_cast<uint64_t>(kRetryBaseMs) << shift;
-  return static_cast<uint32_t>(
-      std::min<uint64_t>(delay, kRetryMaxMs));
 }
 
 const char* MOMQTT::brokerName(BrokerId broker) noexcept {

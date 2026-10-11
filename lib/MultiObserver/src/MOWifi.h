@@ -37,7 +37,7 @@ class MOWifi {
 
  private:
   static constexpr uint32_t kConnectTimeoutMs = 45'000;
-  static constexpr uint32_t kRetryIntervalMs = 15'000;
+  static constexpr uint32_t kRetryIntervalMs = 180'000;
 
   void startConnection();
   void handleConnecting(uint32_t now);

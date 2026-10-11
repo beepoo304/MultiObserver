@@ -6,14 +6,13 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <vector>
 
 namespace {
 constexpr uint32_t kPrefsMagic = 0x4D4F4532;  // MOE2
-constexpr uint32_t kRebootMagic = 0x4D4F5752; // MOWR
+constexpr uint32_t kRebootMagic = 0x4D4F5754; // MOWT + broker mask
 constexpr char kPrefsFilename[] = "/mo_etap2_prefs";
 constexpr char kRebootFilename[] = "/mo_wdg_reboot";
-constexpr char kLogFilename[] = "/mo_wdg_log";
+constexpr char kObsoleteWdgLogFilename[] = "/mo_wdg_log";
 constexpr char kRemoteCliFilename[] = "/mo_rcli_on";
 constexpr uint32_t kRemoteCliMagic = 0x4D4F5243; // MORC
 
@@ -70,6 +69,7 @@ void MOEtap2Prefs::defaults() {
 
 bool MOEtap2Prefs::load() {
   defaults();
+  if (SPIFFS.exists(kObsoleteWdgLogFilename)) SPIFFS.remove(kObsoleteWdgLogFilename);
   PersistedPrefs persisted{};
   if (!readExact(kPrefsFilename, &persisted, sizeof(persisted)) ||
       persisted.magic != kPrefsMagic) {
@@ -130,81 +130,16 @@ void MOEtap2Prefs::setRemoteCliEnabled(bool enabled) noexcept {
   remoteCliEnabled_ = enabled;
 }
 
-bool MOEtap2Prefs::markWatchdogReboot() const {
-  return writeExact(kRebootFilename, &kRebootMagic, sizeof(kRebootMagic));
+bool MOEtap2Prefs::markWatchdogReboot(uint8_t brokerMask) const {
+  const uint32_t marker = (kRebootMagic & 0xFFFFFFFCU) | (brokerMask & 0x03U);
+  return writeExact(kRebootFilename, &marker, sizeof(marker));
 }
 
-bool MOEtap2Prefs::consumeWatchdogReboot() const {
+uint8_t MOEtap2Prefs::consumeWatchdogReboot() const {
   uint32_t marker = 0;
   const bool marked = readExact(kRebootFilename, &marker, sizeof(marker)) &&
-                      marker == kRebootMagic;
+                      (marker & 0xFFFFFFFCU) == (kRebootMagic & 0xFFFFFFFCU);
   if (SPIFFS.exists(kRebootFilename)) SPIFFS.remove(kRebootFilename);
-  return marked;
+  return marked ? static_cast<uint8_t>(marker & 0x03U) : 0;
 }
 
-bool MOEtap2Prefs::appendLog(std::string_view day, std::string_view entry) const {
-  if (day.empty() || entry.empty() || day.find('\n') != std::string_view::npos ||
-      entry.find('\n') != std::string_view::npos) return false;
-
-  const std::string header = "D " + std::string(day) + "\n";
-  bool currentDay = false;
-  if (SPIFFS.exists(kLogFilename)) {
-    File in = SPIFFS.open(kLogFilename, "r");
-    if (!in) return false;
-    std::string savedHeader;
-    while (in.available()) {
-      const char value = static_cast<char>(in.read());
-      savedHeader.push_back(value);
-      if (value == '\n' || savedHeader.size() >= header.size()) break;
-    }
-    in.close();
-    currentDay = savedHeader == header;
-  }
-
-  if (!currentDay) {
-    if (!writeExact(kLogFilename, header.data(), header.size())) return false;
-  }
-  File out = SPIFFS.open(kLogFilename, "a", true);
-  if (!out) return false;
-  const bool ok = out.write(reinterpret_cast<const uint8_t*>(entry.data()),
-                            entry.size()) == entry.size() &&
-                  out.write(static_cast<uint8_t>('\n')) == 1;
-  out.close();
-  return ok;
-}
-
-bool MOEtap2Prefs::readLastLogLines(std::string_view day, size_t maxLines,
-                                    std::string& output) const {
-  output.clear();
-  if (!SPIFFS.exists(kLogFilename)) return true;
-  File file = SPIFFS.open(kLogFilename, "r");
-  if (!file) return false;
-  std::string content;
-  content.reserve(file.size());
-  while (file.available()) content.push_back(static_cast<char>(file.read()));
-  file.close();
-  const std::string header = "D " + std::string(day) + "\n";
-  if (content.rfind(header, 0) != 0) {
-    SPIFFS.remove(kLogFilename);
-    return true;
-  }
-  if (maxLines == 0) return true;
-  std::vector<std::string> lines;
-  size_t start = header.size();
-  while (start < content.size()) {
-    const size_t end = content.find('\n', start);
-    if (end == std::string::npos) break;
-    if (end > start) lines.emplace_back(content.substr(start, end - start));
-    start = end + 1;
-  }
-  const size_t first = lines.size() > maxLines ? lines.size() - maxLines : 0;
-  for (size_t i = first; i < lines.size(); ++i) {
-    if (!output.empty()) output += " | ";
-    output += lines[i];
-  }
-  return true;
-}
-
-bool MOEtap2Prefs::clearLog() const {
-  return !SPIFFS.exists(kLogFilename) || SPIFFS.remove(kLogFilename);
-}

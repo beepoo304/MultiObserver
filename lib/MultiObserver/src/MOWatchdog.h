@@ -18,67 +18,40 @@ class MOWatchdog {
   void setAlertSink(AlertSink sink, void* context) noexcept;
   void restartGrace() noexcept;
   void setEnabled(bool enabled) noexcept;
-
   void formatStatus(char* output, size_t outputSize) const noexcept;
-  bool formatLog(char* output, size_t outputSize) const noexcept;
-  bool clearLog() const;
 
  private:
-  enum class Phase : uint8_t { Grace, Normal, Silent };
-  enum class OutageStage : uint8_t {
-    None,
-    First,
-    Second,
-    Third,
-    Alerted,
-    RebootPending,
-  };
-  enum class Service : uint8_t { None, Wifi, Mqtt1, Mqtt2 };
-
-  struct ServiceTrack {
+  enum class Phase : uint8_t { Grace, Normal };
+  struct BrokerRecovery {
     bool down{false};
-    OutageStage stage{OutageStage::None};
-    uint32_t nextActionAtMs{0};
-    uint32_t silentSinceMs{0};
+    bool postReboot{false};
+    uint8_t attempts{0};
+    uint32_t nextActionMs{0};
   };
 
+  static constexpr uint8_t kMqtt1Bit = 1U << 0;
+  static constexpr uint8_t kMqtt2Bit = 1U << 1;
   static constexpr uint32_t kWifiCheckMs = 5'000;
-  static constexpr uint32_t kMqttCheckMs = 15'000;
-  static constexpr uint32_t kSilentCheckMs = 60'000;
-  // Bound post-reboot cooling down; a failed broker must never permanently
-  // disable recovery for Wi-Fi or the other broker.
-  static constexpr uint32_t kSilentCooldownMs = 15 * 60'000;
-  static constexpr uint32_t kWifiFirstMs = 3 * 60'000;
-  static constexpr uint32_t kWifiSecondMs = 5 * 60'000;
-  static constexpr uint32_t kWifiThirdMs = 30 * 60'000;
-  static constexpr uint32_t kMqttFirstMs = 3 * 60'000;
-  static constexpr uint32_t kMqttSecondMs = 5 * 60'000;
-  static constexpr uint32_t kMqttThirdMs = 15 * 60'000;
-  static constexpr uint32_t kMqttFourthMs = 30 * 60'000;
-  static constexpr uint32_t kRebootDelayMs = 3 * 60'000;
+  static constexpr uint32_t kServiceCheckMs = 5'000;
+  static constexpr uint32_t kWifiRestartAfterMs = 30'000;
+  static constexpr uint32_t kRetryIntervalMs = 3 * 60'000;
+  static constexpr uint32_t kPostRebootRetryMs = 5 * 60'000;
+  static constexpr uint32_t kRebootDelayMs = 30'000;
 
   void finishGrace(uint32_t now);
-  void runNormal(uint32_t now);
-  void runSilent(uint32_t now);
   void checkWifi(uint32_t now);
-  void checkMqtt(MOMQTT::BrokerId broker, ServiceTrack& track,
-                 uint32_t now);
-  void handleWifiDown(uint32_t now);
-  void handleMqttDown(MOMQTT::BrokerId broker, ServiceTrack& track,
-                      uint32_t now);
-  void clearTrack(ServiceTrack& track) noexcept;
-  void scheduleReboot(Service service, uint32_t now);
-  void cancelReboot(Service service);
+  void checkBroker(MOMQTT::BrokerId broker, BrokerRecovery& recovery,
+                   uint32_t now);
+  void scheduleReboot(uint8_t brokerBit, uint32_t now);
+  void checkReboot(uint32_t now);
   void sendAlert(const char* text);
-  void logEvent(const char* event) const;
-  bool mqttSupervised(MOMQTT::BrokerId broker) const noexcept;
-  bool mqttHealthy(MOMQTT::BrokerId broker) const noexcept;
-  bool anyServiceDown() const noexcept;
+  bool brokerConfigured(MOMQTT::BrokerId broker) const noexcept;
+  bool brokerReady(MOMQTT::BrokerId broker) const noexcept;
+  bool brokerConnected(MOMQTT::BrokerId broker) const noexcept;
   static bool elapsed(uint32_t now, uint32_t at) noexcept;
-  static void durationText(uint32_t milliseconds, char* output,
-                           size_t outputSize) noexcept;
   static const char* phaseName(Phase phase) noexcept;
-  static const char* serviceName(Service service) noexcept;
+  static const char* brokerName(MOMQTT::BrokerId broker) noexcept;
+  static uint8_t brokerBit(MOMQTT::BrokerId broker) noexcept;
 
   MOEtap2Prefs& prefs_;
   MOWifi& wifi_;
@@ -86,21 +59,14 @@ class MOWatchdog {
   AlertSink alertSink_{nullptr};
   void* alertContext_{nullptr};
   Phase phase_{Phase::Grace};
-  bool bootAfterWatchdog_{false};
-  bool rebootScheduled_{false};
-  uint8_t rebootServices_{0};
-  bool silentWifi_{false};
-  bool silentMqtt1_{false};
-  bool silentMqtt2_{false};
-  uint32_t rebootAtMs_{0};
   uint32_t graceStartedMs_{0};
   uint32_t nextWifiCheckMs_{0};
-  uint32_t nextMqttCheckMs_{0};
-  uint32_t nextSilentCheckMs_{0};
-  uint32_t silentStartedMs_{0};
-  uint32_t nextLogRotationCheckMs_{0};
-  int32_t logDayId_{-1};
-  ServiceTrack wifiTrack_{};
-  ServiceTrack mqtt1Track_{};
-  ServiceTrack mqtt2Track_{};
+  uint32_t nextServiceCheckMs_{0};
+  uint32_t wifiDownSinceMs_{0};
+  bool wifiRestarted_{false};
+  uint8_t postRebootMask_{0};
+  uint8_t rebootBrokerMask_{0};
+  uint32_t rebootAtMs_{0};
+  BrokerRecovery mqtt1_{};
+  BrokerRecovery mqtt2_{};
 };

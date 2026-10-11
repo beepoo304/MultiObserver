@@ -18,6 +18,9 @@ exe = out / ('recovery.exe' if os.name == 'nt' else 'recovery')
 command = [args.compiler]
 if Path(args.compiler).stem == 'zig':
     command += ['c++']
+    # Zig's bundled libc++ emits this header-only warning hundreds of times;
+    # suppress it while keeping warnings enabled for the project and tests.
+    command += ['-Wno-nullability-completeness']
 command += ['-std=c++17', '-O0', '-g', '-Wall', '-Wextra',
             '-I' + str(root / 'tests/runtime/stubs'),
             '-I' + str(root / 'lib/MultiObserver/src'),

@@ -191,7 +191,7 @@ def main() -> int:
         "handleCommand(senderTimestamp, command, reply)" in mymesh_cpp,
         "watchdog CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get wdg.status", "wdg.on", "wdg.off", "get wdg.grace",
-            "wdg.grace", "restart.wdg", "get wdg.log", "wdg.log",
+            "wdg.grace", "restart.wdg",
         )),
         "alert channel CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get channel.status", "channel.on", "channel.off",
@@ -237,3 +237,4 @@ if __name__ == "__main__":
     except VerifyError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         raise SystemExit(2)
+

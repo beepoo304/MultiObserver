@@ -35,7 +35,6 @@ command only on a trusted serial or authenticated MeshCore CLI session.
 | --- | --- |
 | `OK` | The value or state was accepted and saved, or the requested runtime restart was started. |
 | `ERR` | Validation, persistence or queue submission failed. The command was recognized but not completed. |
-| `CLEAR` | The WDG event log is empty, or it was cleared successfully. |
 | `QUEUED` | MeshCore's native outbound queue accepted the encrypted AC message. It is not a delivery ACK. |
 
 An unsupported or malformed command may be left to the upstream MeshCore CLI
@@ -109,29 +108,19 @@ for example `KTW`.
 
 | Command | Reply | Description |
 | --- | --- | --- |
-| `get wdg.status` | status line | Show WDG ON/OFF, phase, Wi-Fi/MQTT health and whether a reboot is pending. |
+| `get wdg.status` | status line | Show WDG mode, phase, Wi-Fi/MQTT connection health and pending reboot state. |
 | `set wdg.on` | `OK` / `ERR` | Persistently enable WDG and start a fresh grace period. |
-| `set wdg.off` | `OK` / `ERR` | Persistently disable WDG, clear escalation state and cancel a pending WDG reboot. |
+| `set wdg.off` | `OK` / `ERR` | Disable WDG and cancel active recovery or a pending WDG reboot. |
 | `get wdg.grace` | `WDG GRACE <seconds>` | Show the saved startup grace period. |
-| `set wdg.grace <120-300>` | `OK` / `ERR` | Save a valid grace period and restart the WDG state machine in GRACE. |
-| `restart.wdg` | `OK` | Reset only WDG escalation and start a fresh grace period. The ESP is not rebooted. |
-| `get wdg.log` | log / `CLEAR` | Return at most the last five short events from the current local repeater day. |
-| `set wdg.log 1` | `CLEAR` / `ERR` | Clear the persistent WDG event log. The literal value `1` is required. |
+| `set wdg.grace <120-300>` | `OK` / `ERR` | Save a valid grace period and restart WDG grace. |
+| `restart.wdg` | `OK` | Reset WDG and its grace timer without rebooting the ESP. |
 
-WDG phases shown by `get wdg.status` are:
+WDG phases shown by `get wdg.status` are `GRACE` (startup wait) and `NORMAL`
+(active recovery). MQTT `UP`/`DOWN` is based on the connection state; `OFF`
+means the broker is not configured.
 
-| Phase | Meaning |
-| --- | --- |
-| `GRACE` | Startup protection is active; WDG is waiting before supervision begins. |
-| `NORMAL` | Normal staged supervision and recovery are active. |
-| `SILENT` | The previous reboot was requested by WDG and a failed service is checked every minute without another reboot loop. |
-
-MQTT status inside the WDG reply is `OFF` when that broker is not configured
-for supervision. A pending final-stage reboot is reported as `reboot=PENDING`.
-
-The full Wi-Fi/MQTT escalation timings, reboot marker and silent-mode recovery
-rules are documented in the [main README](README.md#watchdog).
-
+The Wi-Fi/MQTT recovery timings and reboot-loop prevention are documented in
+the [main README](README.md#watchdog).
 ## Private AlertChannel commands
 
 | Command | Reply | Description |
@@ -154,7 +143,7 @@ queue:
 AlertChannel newStart YYYY-MM-DD HH:MM:SS
 ```
 
-AC and WDG-log text uses local repeater time. The default build uses automatic
+AC text uses local repeater time. The default build uses automatic
 CET/CEST daylight-saving rules. MeshCore packet epochs and MQTT timestamps
 remain UTC.
 
@@ -231,7 +220,6 @@ get channel.status
 get rcli.status
 get wdg.grace
 get wdg.status
-get wdg.log
 test.channel
 ```
 
@@ -250,3 +238,6 @@ real private-channel secret.
 | AlertChannel | 6 |
 | Remote CLI | 3 |
 | **Total** | **44** |
+
+
+

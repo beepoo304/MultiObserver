@@ -109,7 +109,9 @@ class MOMQTT {
   [[nodiscard]] BrokerStatus status(BrokerId broker) const noexcept;
   [[nodiscard]] bool connected(BrokerId broker) const noexcept;
   [[nodiscard]] bool configured(BrokerId broker) const noexcept;
+  [[nodiscard]] bool canAttempt(BrokerId broker) const noexcept;
   [[nodiscard]] bool publishingHealthy(BrokerId broker) const noexcept;
+  void setRetryInterval(BrokerId broker, uint32_t intervalMs) noexcept;
 
   void setObserverIdentity(std::string_view originId);
 
@@ -127,8 +129,7 @@ class MOMQTT {
   static constexpr size_t kStatusJsonBufferSize = 768;
   static constexpr uint32_t kKeepAliveSeconds = 30;
   static constexpr uint32_t kConnectTimeoutMs = 10'000;
-  static constexpr uint32_t kRetryBaseMs = 10'000;
-  static constexpr uint32_t kRetryMaxMs = 300'000;
+  static constexpr uint32_t kRetryIntervalMs = 180'000;
   static constexpr uint32_t kStatusIntervalMs = 300'000;
   static constexpr size_t kMqttBufferSize = 768;
   static constexpr size_t kMqttOutBufferSize = 1280;
@@ -139,6 +140,7 @@ class MOMQTT {
     uint32_t lastConnectAttemptMs{0};
     uint32_t nextConnectAttemptMs{0};
     uint32_t reconnectFailures{0};
+    uint32_t retryIntervalMs{kRetryIntervalMs};
     esp_err_t lastError{ESP_OK};
     bool started{false};
     bool reconnectPending{false};
@@ -212,7 +214,6 @@ class MOMQTT {
                                     BrokerId broker) noexcept;
 
   static size_t index(BrokerId broker) noexcept;
-  static uint32_t retryDelayMs(uint32_t failures) noexcept;
   static const char* brokerName(BrokerId broker) noexcept;
 
   std::string observerId_;

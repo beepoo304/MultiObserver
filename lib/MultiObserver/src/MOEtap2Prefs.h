@@ -31,15 +31,8 @@ class MOEtap2Prefs {
 
   // This marker is deliberately separate from user preferences. It is written
   // immediately before an ESP restart and consumed exactly once at next boot.
-  bool markWatchdogReboot() const;
-  bool consumeWatchdogReboot() const;
-
-  // Each entry is short. The file keeps all state transitions for the current
-  // repeater-clock day; callers request only the last few lines for CLI.
-  bool appendLog(std::string_view day, std::string_view entry) const;
-  bool readLastLogLines(std::string_view day, size_t maxLines,
-                        std::string& output) const;
-  bool clearLog() const;
+  bool markWatchdogReboot(uint8_t brokerMask) const;
+  uint8_t consumeWatchdogReboot() const;
 
  private:
   bool watchdogEnabled_{true};
