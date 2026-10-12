@@ -5,8 +5,10 @@ import unittest
 from installer.mo_installer.common import InstallError
 from installer.mo_installer.patches import (
     patch_alert_channel_bridge,
+    patch_mymesh_cpp,
     patch_platformio,
     patch_remote_cli_bridge,
+    patch_status_sampling,
 )
 
 
@@ -68,6 +70,36 @@ class PlatformioPatchTests(unittest.TestCase):
         )
         with self.assertRaises(InstallError):
             patch_platformio(malformed)
+
+
+class ClientLabelPatchTests(unittest.TestCase):
+    CLIENT_LABEL = "github.com/beepoo304/MultiObserver"
+
+    def test_fresh_install_uses_repository_link_as_client_label(self) -> None:
+        source = """#include \"MyMesh.h\"
+void MyMesh::begin() {
+  _cli.loadPrefs(_fs);
+}
+void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {}
+void MyMesh::logTx(mesh::Packet *pkt, int len) {}
+void MyMesh::loop() {
+  uptime_millis += now - last_millis;
+  _cli.handleCommand(sender_timestamp, command, reply);
+}
+"""
+        patched = patch_mymesh_cpp(source)
+        self.assertIn(f'.clientVersion = "{self.CLIENT_LABEL}"', patched)
+
+    def test_migrated_status_sampling_keeps_repository_link(self) -> None:
+        source = """void MyMesh::loop() {
+  MOBridge::StatusSnapshot mo_status{
+    .status = \"online\",
+  };
+    mo_bridge.setStatusSnapshot(mo_status);
+  }
+"""
+        patched = patch_status_sampling(source)
+        self.assertIn(f'.clientVersion = "{self.CLIENT_LABEL}"', patched)
 
 
 class AlertBridgePatchTests(unittest.TestCase):
