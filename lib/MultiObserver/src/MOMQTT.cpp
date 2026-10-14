@@ -222,7 +222,8 @@ MOMQTT::BrokerStatus MOMQTT::status(BrokerId broker) const noexcept {
           .lastError = state.lastError,
           .lastPublishQueuedMs = state.lastPublishQueuedMs,
           .lastPublishConfirmedMs = state.lastPublishConfirmedMs,
-          .connectedSinceMs = state.connectedSinceMs};
+          .connectedSinceMs = state.connectedSinceMs,
+          .deferredForHeap = state.deferredForHeap};
 }
 
 bool MOMQTT::connected(BrokerId broker) const noexcept {
@@ -513,6 +514,7 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
   if (!hasConnectHeadroom(broker)) {
     state.state = State::Backoff;
     state.reconnectPending = true;
+    state.deferredForHeap = true;
     state.nextConnectAttemptMs = now + state.retryIntervalMs;
     Serial.printf("[MO][%s] deferred: insufficient heap retry_ms=%lu\n",
                   brokerName(broker),
@@ -521,6 +523,7 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
   }
 
   state.reconnectPending = false;
+  state.deferredForHeap = false;
   state.lastConnectAttemptMs = now;
   state.state = State::Connecting;
   Serial.printf("[MO][%s] connecting t=%lu attempt=%lu\n",
@@ -687,6 +690,7 @@ void MOMQTT::clearRuntime(BrokerId broker) {
   state.reconnectPending = false;
   state.nextConnectAttemptMs = 0;
   state.connectedSinceMs = 0;
+  state.deferredForHeap = false;
   state.lastPublishQueuedMs = 0;
   state.lastPublishConfirmedMs = 0;
 }

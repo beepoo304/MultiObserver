@@ -155,6 +155,8 @@ void storageFailureCannotVetoReboot() {
 void postRebootRetriesDoNotLoop() {
   Fixture f; bootMarkerMask = 1; f.startWatchdog();
   assert(f.wdg.mqtt1_.postReboot);
+  // The post-reboot "down" alert waits out the 15 s handshake settle window.
+  f.advance(15'000);
   assert(!alerts.empty() && alerts.back() == "mqtt1.down");
   f.advance(5 * 60'000); assert(f.wdg.mqtt1_.postReboot && f.wdg.rebootBrokerMask_ == 0);
   assert(alerts.back() == "mqtt1.down");

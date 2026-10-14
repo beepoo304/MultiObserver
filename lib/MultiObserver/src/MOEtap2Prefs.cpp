@@ -139,7 +139,13 @@ uint8_t MOEtap2Prefs::consumeWatchdogReboot() const {
   uint32_t marker = 0;
   const bool marked = readExact(kRebootFilename, &marker, sizeof(marker)) &&
                       (marker & 0xFFFFFFFCU) == (kRebootMagic & 0xFFFFFFFCU);
-  if (SPIFFS.exists(kRebootFilename)) SPIFFS.remove(kRebootFilename);
+  if (SPIFFS.exists(kRebootFilename)) {
+    if (!SPIFFS.remove(kRebootFilename)) {
+      // Removal failed: neutralize the marker so the next boot cannot
+      // mistakenly re-enter post-reboot mode.
+      const uint32_t zero = 0;
+      (void)writeExact(kRebootFilename, &zero, sizeof(zero));
+    }
+  }
   return marked ? static_cast<uint8_t>(marker & 0x03U) : 0;
 }
-

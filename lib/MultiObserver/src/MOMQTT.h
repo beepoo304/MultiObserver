@@ -41,6 +41,7 @@ class MOMQTT {
     uint32_t lastPublishQueuedMs{0};
     uint32_t lastPublishConfirmedMs{0};
     uint32_t connectedSinceMs{0};
+    bool deferredForHeap{false};
   };
 
   struct PacketData {
@@ -145,6 +146,7 @@ class MOMQTT {
     bool started{false};
     bool reconnectPending{false};
     bool forcedEnabled{false};
+    bool deferredForHeap{false};
     uint32_t connectedSinceMs{0};
     uint32_t lastPublishQueuedMs{0};
     uint32_t lastPublishConfirmedMs{0};

@@ -1,0 +1,210 @@
+diff --git a/lib/MultiObserver/library.json b/lib/MultiObserver/library.json
+index 489973f..62c91d8 100644
+--- a/lib/MultiObserver/library.json
++++ b/lib/MultiObserver/library.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "MultiObserver",
+-  "version": "0.3.2",
++  "version": "0.3.3",
+   "description": "MultiObserver extension for the MeshCore simple repeater",
+   "keywords": [
+     "meshcore",
+@@ -14,4 +14,4 @@
+     "srcDir": "src",
+     "includeDir": "src"
+   }
+-}
++}
+\ No newline at end of file
+diff --git a/lib/MultiObserver/src/MOEtap2Prefs.cpp b/lib/MultiObserver/src/MOEtap2Prefs.cpp
+index 8dba2f2..a37a662 100644
+--- a/lib/MultiObserver/src/MOEtap2Prefs.cpp
++++ b/lib/MultiObserver/src/MOEtap2Prefs.cpp
+@@ -139,7 +139,13 @@ uint8_t MOEtap2Prefs::consumeWatchdogReboot() const {
+   uint32_t marker = 0;
+   const bool marked = readExact(kRebootFilename, &marker, sizeof(marker)) &&
+                       (marker & 0xFFFFFFFCU) == (kRebootMagic & 0xFFFFFFFCU);
+-  if (SPIFFS.exists(kRebootFilename)) SPIFFS.remove(kRebootFilename);
++  if (SPIFFS.exists(kRebootFilename)) {
++    if (!SPIFFS.remove(kRebootFilename)) {
++      // Removal failed: neutralize the marker so the next boot cannot
++      // mistakenly re-enter post-reboot mode.
++      const uint32_t zero = 0;
++      (void)writeExact(kRebootFilename, &zero, sizeof(zero));
++    }
++  }
+   return marked ? static_cast<uint8_t>(marker & 0x03U) : 0;
+-}
+-
++}
+\ No newline at end of file
+diff --git a/lib/MultiObserver/src/MOMQTT.cpp b/lib/MultiObserver/src/MOMQTT.cpp
+index d369e60..b5794b5 100644
+--- a/lib/MultiObserver/src/MOMQTT.cpp
++++ b/lib/MultiObserver/src/MOMQTT.cpp
+@@ -222,7 +222,8 @@ MOMQTT::BrokerStatus MOMQTT::status(BrokerId broker) const noexcept {
+           .lastError = state.lastError,
+           .lastPublishQueuedMs = state.lastPublishQueuedMs,
+           .lastPublishConfirmedMs = state.lastPublishConfirmedMs,
+-          .connectedSinceMs = state.connectedSinceMs};
++          .connectedSinceMs = state.connectedSinceMs,
++          .deferredForHeap = state.deferredForHeap};
+ }
+ 
+ bool MOMQTT::connected(BrokerId broker) const noexcept {
+@@ -513,6 +514,7 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
+   if (!hasConnectHeadroom(broker)) {
+     state.state = State::Backoff;
+     state.reconnectPending = true;
++    state.deferredForHeap = true;
+     state.nextConnectAttemptMs = now + state.retryIntervalMs;
+     Serial.printf("[MO][%s] deferred: insufficient heap retry_ms=%lu\n",
+                   brokerName(broker),
+@@ -521,6 +523,7 @@ void MOMQTT::ensureBroker(BrokerId broker, uint32_t now) {
+   }
+ 
+   state.reconnectPending = false;
++  state.deferredForHeap = false;
+   state.lastConnectAttemptMs = now;
+   state.state = State::Connecting;
+   Serial.printf("[MO][%s] connecting t=%lu attempt=%lu\n",
+@@ -687,6 +690,7 @@ void MOMQTT::clearRuntime(BrokerId broker) {
+   state.reconnectPending = false;
+   state.nextConnectAttemptMs = 0;
+   state.connectedSinceMs = 0;
++  state.deferredForHeap = false;
+   state.lastPublishQueuedMs = 0;
+   state.lastPublishConfirmedMs = 0;
+ }
+@@ -1006,4 +1010,4 @@ size_t MOMQTT::index(BrokerId broker) noexcept {
+ 
+ const char* MOMQTT::brokerName(BrokerId broker) noexcept {
+   return broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2";
+-}
++}
+\ No newline at end of file
+diff --git a/lib/MultiObserver/src/MOMQTT.h b/lib/MultiObserver/src/MOMQTT.h
+index 1068982..36cd3ef 100644
+--- a/lib/MultiObserver/src/MOMQTT.h
++++ b/lib/MultiObserver/src/MOMQTT.h
+@@ -41,6 +41,7 @@ class MOMQTT {
+     uint32_t lastPublishQueuedMs{0};
+     uint32_t lastPublishConfirmedMs{0};
+     uint32_t connectedSinceMs{0};
++    bool deferredForHeap{false};
+   };
+ 
+   struct PacketData {
+@@ -145,6 +146,7 @@ class MOMQTT {
+     bool started{false};
+     bool reconnectPending{false};
+     bool forcedEnabled{false};
++    bool deferredForHeap{false};
+     uint32_t connectedSinceMs{0};
+     uint32_t lastPublishQueuedMs{0};
+     uint32_t lastPublishConfirmedMs{0};
+@@ -246,4 +248,4 @@ class MOMQTT {
+   } statusSnapshot_{};
+   uint32_t lastStatusPublishMs_{0};
+   bool running_{false};
+-};
++};
+\ No newline at end of file
+diff --git a/lib/MultiObserver/src/MOWatchdog.cpp b/lib/MultiObserver/src/MOWatchdog.cpp
+index c7bdccd..35a622f 100644
+--- a/lib/MultiObserver/src/MOWatchdog.cpp
++++ b/lib/MultiObserver/src/MOWatchdog.cpp
+@@ -128,30 +128,40 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
+     recovery.postReboot = true;
+     mqtt_.setRetryInterval(broker, kPostRebootRetryMs);
+     if (recovery.nextActionMs == 0) {
+-      sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.down"
+-                                                   : "mqtt2.down");
+-      mqtt_.restart(broker);
+-      recovery.down = true;
+-      recovery.nextActionMs = now + kPostRebootRetryMs;
+-      Serial.printf("[MO][WDG][%s] post-reboot retry every 5m\n",
+-                    brokerName(broker));
++      // Let any in-flight handshake finish before declaring the broker down.
++      recovery.nextActionMs = now + 15'000;
+       return;
+     }
+     if (elapsed(now, recovery.nextActionMs) &&
+         mqtt_.status(broker).state != MOMQTT::State::Connecting) {
++      if (!recovery.down) {
++        sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.down"
++                                                     : "mqtt2.down");
++        recovery.down = true;
++      }
+       mqtt_.restart(broker);
+       recovery.nextActionMs = now + kPostRebootRetryMs;
++      Serial.printf("[MO][WDG][%s] post-reboot retry every 5m\n",
++                    brokerName(broker));
+     }
+     return;
+   }
+ 
+   if (!recovery.down) {
++    const MOMQTT::BrokerStatus st = mqtt_.status(broker);
++    if (st.state == MOMQTT::State::Connecting) return;  // handshake in progress
+     recovery.down = true;
+     recovery.attempts = 1;
+     recovery.nextActionMs = now + kRetryIntervalMs;
+     mqtt_.setRetryInterval(broker, kRetryIntervalMs);
+-    mqtt_.restart(broker);
+-    Serial.printf("[MO][WDG][%s] outage; attempt 1/3\n", brokerName(broker));
++    if (st.deferredForHeap) {
++      // Client could not even start (low heap): restarting it would not help.
++      Serial.printf("[MO][WDG][%s] outage; attempt 1/3 (heap-deferred)\n",
++                    brokerName(broker));
++    } else {
++      mqtt_.restart(broker);
++      Serial.printf("[MO][WDG][%s] outage; attempt 1/3\n", brokerName(broker));
++    }
+     return;
+   }
+ 
+@@ -162,10 +172,11 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
+   }
+   if (recovery.attempts < 3) {
+     ++recovery.attempts;
+-    mqtt_.restart(broker);
++    const bool heapDeferred = mqtt_.status(broker).deferredForHeap;
++    if (!heapDeferred) mqtt_.restart(broker);
+     recovery.nextActionMs = now + kRetryIntervalMs;
+-    Serial.printf("[MO][WDG][%s] attempt %u/3\n", brokerName(broker),
+-                  recovery.attempts);
++    Serial.printf("[MO][WDG][%s] attempt %u/3%s\n", brokerName(broker),
++                  recovery.attempts, heapDeferred ? " (heap-deferred)" : "");
+     return;
+   }
+ 
+@@ -259,5 +270,4 @@ void MOWatchdog::formatStatus(char* output, size_t outputSize) const noexcept {
+                 !brokerConfigured(MOMQTT::BrokerId::Mqtt2) ? "OFF" :
+                     (brokerConnected(MOMQTT::BrokerId::Mqtt2) ? "UP" : "DOWN"),
+                 rebootBrokerMask_ != 0 ? "PENDING" : "NO");
+-}
+-
++}
+\ No newline at end of file
+diff --git a/tests/runtime/recovery.cpp b/tests/runtime/recovery.cpp
+index de1d65c..225900f 100644
+--- a/tests/runtime/recovery.cpp
++++ b/tests/runtime/recovery.cpp
+@@ -155,6 +155,8 @@ void storageFailureCannotVetoReboot() {
+ void postRebootRetriesDoNotLoop() {
+   Fixture f; bootMarkerMask = 1; f.startWatchdog();
+   assert(f.wdg.mqtt1_.postReboot);
++  // The post-reboot "down" alert waits out the 15 s handshake settle window.
++  f.advance(15'000);
+   assert(!alerts.empty() && alerts.back() == "mqtt1.down");
+   f.advance(5 * 60'000); assert(f.wdg.mqtt1_.postReboot && f.wdg.rebootBrokerMask_ == 0);
+   assert(alerts.back() == "mqtt1.down");
+@@ -191,4 +193,4 @@ int main() {
+   run("status labels and WDG disable", statusLabelsAndDisable);
+   for (auto* c : allClients) delete c;
+   std::cout << count << " runtime scenarios passed\n";
+-}
++}
+\ No newline at end of file

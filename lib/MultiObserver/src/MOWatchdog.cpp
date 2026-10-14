@@ -128,30 +128,40 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
     recovery.postReboot = true;
     mqtt_.setRetryInterval(broker, kPostRebootRetryMs);
     if (recovery.nextActionMs == 0) {
-      sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.down"
-                                                   : "mqtt2.down");
-      mqtt_.restart(broker);
-      recovery.down = true;
-      recovery.nextActionMs = now + kPostRebootRetryMs;
-      Serial.printf("[MO][WDG][%s] post-reboot retry every 5m\n",
-                    brokerName(broker));
+      // Let any in-flight handshake finish before declaring the broker down.
+      recovery.nextActionMs = now + 15'000;
       return;
     }
     if (elapsed(now, recovery.nextActionMs) &&
         mqtt_.status(broker).state != MOMQTT::State::Connecting) {
+      if (!recovery.down) {
+        sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.down"
+                                                     : "mqtt2.down");
+        recovery.down = true;
+      }
       mqtt_.restart(broker);
       recovery.nextActionMs = now + kPostRebootRetryMs;
+      Serial.printf("[MO][WDG][%s] post-reboot retry every 5m\n",
+                    brokerName(broker));
     }
     return;
   }
 
   if (!recovery.down) {
+    const MOMQTT::BrokerStatus st = mqtt_.status(broker);
+    if (st.state == MOMQTT::State::Connecting) return;  // handshake in progress
     recovery.down = true;
     recovery.attempts = 1;
     recovery.nextActionMs = now + kRetryIntervalMs;
     mqtt_.setRetryInterval(broker, kRetryIntervalMs);
-    mqtt_.restart(broker);
-    Serial.printf("[MO][WDG][%s] outage; attempt 1/3\n", brokerName(broker));
+    if (st.deferredForHeap) {
+      // Client could not even start (low heap): restarting it would not help.
+      Serial.printf("[MO][WDG][%s] outage; attempt 1/3 (heap-deferred)\n",
+                    brokerName(broker));
+    } else {
+      mqtt_.restart(broker);
+      Serial.printf("[MO][WDG][%s] outage; attempt 1/3\n", brokerName(broker));
+    }
     return;
   }
 
@@ -162,10 +172,11 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
   }
   if (recovery.attempts < 3) {
     ++recovery.attempts;
-    mqtt_.restart(broker);
+    const bool heapDeferred = mqtt_.status(broker).deferredForHeap;
+    if (!heapDeferred) mqtt_.restart(broker);
     recovery.nextActionMs = now + kRetryIntervalMs;
-    Serial.printf("[MO][WDG][%s] attempt %u/3\n", brokerName(broker),
-                  recovery.attempts);
+    Serial.printf("[MO][WDG][%s] attempt %u/3%s\n", brokerName(broker),
+                  recovery.attempts, heapDeferred ? " (heap-deferred)" : "");
     return;
   }
 
@@ -260,4 +271,3 @@ void MOWatchdog::formatStatus(char* output, size_t outputSize) const noexcept {
                     (brokerConnected(MOMQTT::BrokerId::Mqtt2) ? "UP" : "DOWN"),
                 rebootBrokerMask_ != 0 ? "PENDING" : "NO");
 }
-
