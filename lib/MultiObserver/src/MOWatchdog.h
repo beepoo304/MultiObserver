@@ -33,8 +33,9 @@ class MOWatchdog {
   static constexpr uint8_t kMqtt2Bit = 1U << 1;
   static constexpr uint32_t kWifiCheckMs = 5'000;
   static constexpr uint32_t kServiceCheckMs = 5'000;
-  static constexpr uint32_t kWifiRestartAfterMs = 30'000;
+  static constexpr uint32_t kWifiRestartAfterMs = 15'000;
   static constexpr uint32_t kRetryIntervalMs = 3 * 60'000;
+  static constexpr uint32_t kWifiDownRetryIntervalMs = 10 * 60'000;
   static constexpr uint32_t kPostRebootRetryMs = 5 * 60'000;
   static constexpr uint32_t kRebootDelayMs = 30'000;
 
@@ -64,6 +65,10 @@ class MOWatchdog {
   uint32_t nextServiceCheckMs_{0};
   uint32_t wifiDownSinceMs_{0};
   bool wifiRestarted_{false};
+  uint8_t wifiRestoreAttempts_{0};
+  uint32_t nextWifiRestoreMs_{0};
+  bool wifiDownAlertSent_{false};
+  bool bootStartPending_{false};
   uint8_t postRebootMask_{0};
   uint8_t rebootBrokerMask_{0};
   uint32_t rebootAtMs_{0};
