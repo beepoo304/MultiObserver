@@ -8,6 +8,7 @@ MOWatchdog::MOWatchdog(MOEtap2Prefs& prefs, MOWifi& wifi, MOMQTT& mqtt)
     : prefs_(prefs), wifi_(wifi), mqtt_(mqtt) {}
 
 void MOWatchdog::begin() {
+  bootStartPending_ = true;
   postRebootMask_ = prefs_.consumeWatchdogReboot();
   if (postRebootMask_ & kMqtt1Bit)
     mqtt_.setRetryInterval(MOMQTT::BrokerId::Mqtt1, kPostRebootRetryMs);
@@ -19,7 +20,6 @@ void MOWatchdog::begin() {
 }
 
 void MOWatchdog::loop() {
-  if (!prefs_.watchdogEnabled()) return;
   const uint32_t now = millis();
   if (phase_ == Phase::Grace) {
     if (elapsed(now, graceStartedMs_ +
@@ -28,6 +28,8 @@ void MOWatchdog::loop() {
     }
     return;
   }
+
+  if (!prefs_.watchdogEnabled()) return;
 
   if (elapsed(now, nextWifiCheckMs_)) {
     nextWifiCheckMs_ = now + kWifiCheckMs;
@@ -55,6 +57,9 @@ void MOWatchdog::restartGrace() noexcept {
   nextServiceCheckMs_ = graceStartedMs_;
   wifiDownSinceMs_ = 0;
   wifiRestarted_ = false;
+  wifiRestoreAttempts_ = 0;
+  nextWifiRestoreMs_ = 0;
+  wifiDownAlertSent_ = false;
   rebootBrokerMask_ = 0;
   rebootAtMs_ = 0;
   mqtt1_ = {};
@@ -76,21 +81,72 @@ void MOWatchdog::finishGrace(uint32_t now) {
   phase_ = Phase::Normal;
   nextWifiCheckMs_ = now;
   nextServiceCheckMs_ = now;
-  sendAlert("AlertChannel newStart");
+  // A grace period can also follow manual WDG enable/reset. Only the first
+  // grace after begin() represents an actual ESP boot.
+  if (bootStartPending_) {
+    bootStartPending_ = false;
+    // Only a fresh MOWatchdog::begin() sets this flag. Manual WDG grace resets
+    // must not look like ESP boots.
+    sendAlert("AlertChannel newStart");
+  }
   Serial.println("[MO][WDG] grace complete");
 }
 
 void MOWatchdog::checkWifi(uint32_t now) {
   if (wifi_.healthy()) {
+    if (wifiDownAlertSent_) {
+      sendAlert("wifi.restore");
+      Serial.println("[MO][WDG] wifi restored; alert sent");
+    }
     wifiDownSinceMs_ = 0;
     wifiRestarted_ = false;
+    wifiRestoreAttempts_ = 0;
+    nextWifiRestoreMs_ = 0;
+    wifiDownAlertSent_ = false;
     return;
   }
-  if (wifiDownSinceMs_ == 0) wifiDownSinceMs_ = now;
-  if (!wifiRestarted_ && now - wifiDownSinceMs_ >= kWifiRestartAfterMs) {
+
+  if (wifiDownSinceMs_ == 0) {
+    wifiDownSinceMs_ = now;
+    nextWifiRestoreMs_ = now + kWifiRestartAfterMs;
+    wifiRestoreAttempts_ = 0;
+    wifiRestarted_ = false;
+  }
+
+  if (!elapsed(now, nextWifiRestoreMs_)) return;
+
+  // The third attempt has had a full 3-minute window to recover.
+  if (!wifiDownAlertSent_ && wifiRestoreAttempts_ >= 3) {
+    sendAlert("wifi.down");
+    wifiDownAlertSent_ = true;
+    Serial.println("[MO][WDG] wifi.down alert sent; retries switch to 10m");
     wifi_.restart();
+    nextWifiRestoreMs_ = now + kWifiDownRetryIntervalMs;
     wifiRestarted_ = true;
-    Serial.println("[MO][WDG] wifi restart; connection retry interval=3m");
+    return;
+  }
+
+  // Once three attempts have failed, announce the outage and retry every 10 minutes.
+  if (wifiDownAlertSent_) {
+    wifi_.restart();
+    nextWifiRestoreMs_ = now + kWifiDownRetryIntervalMs;
+    wifiRestarted_ = true;
+    Serial.println("[MO][WDG] Wi-Fi still down; next retry in 10m");
+    return;
+  }
+
+  // First recovery attempt after 15 s; further attempts are spaced 3 minutes apart.
+  wifi_.restart();
+  if (wifiRestoreAttempts_ < 255) ++wifiRestoreAttempts_;
+  nextWifiRestoreMs_ = now + kRetryIntervalMs;
+  wifiRestarted_ = true;
+  Serial.printf("[MO][WDG] wifi restore attempt %u; next retry in 3m\\n",
+                wifiRestoreAttempts_);
+
+  // If the third attempt is about to run, alert only after its failure window.
+  if (wifiRestoreAttempts_ >= 3) {
+    nextWifiRestoreMs_ = now + kRetryIntervalMs;
+    Serial.println("[MO][WDG] third Wi-Fi recovery attempt started");
   }
 }
 
@@ -108,8 +164,8 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
   if (!brokerReady(broker)) return;
 
   if (brokerConnected(broker)) {
-    const bool recovered = recovery.down || recovery.postReboot ||
-                           (postRebootMask_ & bit) != 0;
+    // Do not report ordinary MQTT reconnection as ESP reboot recovery.
+    const bool recovered = (postRebootMask_ & bit) != 0;
     if (recovered) {
       sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.restore"
                                                    : "mqtt2.restore");
