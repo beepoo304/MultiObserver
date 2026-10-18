@@ -31,7 +31,6 @@ class MOWatchdog {
 
   static constexpr uint8_t kMqtt1Bit = 1U << 0;
   static constexpr uint8_t kMqtt2Bit = 1U << 1;
-  static constexpr uint8_t kMqtt3Bit = 1U << 2;
   static constexpr uint32_t kWifiCheckMs = 5'000;
   static constexpr uint32_t kServiceCheckMs = 5'000;
   static constexpr uint32_t kWifiRestartAfterMs = 15'000;
@@ -53,7 +52,6 @@ class MOWatchdog {
   static bool elapsed(uint32_t now, uint32_t at) noexcept;
   static const char* phaseName(Phase phase) noexcept;
   static const char* brokerName(MOMQTT::BrokerId broker) noexcept;
-  static const char* brokerSlug(MOMQTT::BrokerId broker) noexcept;
   static uint8_t brokerBit(MOMQTT::BrokerId broker) noexcept;
 
   MOEtap2Prefs& prefs_;
@@ -76,5 +74,4 @@ class MOWatchdog {
   uint32_t rebootAtMs_{0};
   BrokerRecovery mqtt1_{};
   BrokerRecovery mqtt2_{};
-  BrokerRecovery mqtt3_{};
 };

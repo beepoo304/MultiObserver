@@ -200,13 +200,6 @@ def main() -> int:
         "remote CLI settings": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get rcli.status", "rcli.on", "rcli.off",
         )),
-        "third MQTT broker CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
-            "set mqtt3.", "get mqtt3.", "restart.mqtt3",
-        )),
-        "third MQTT broker runtime and watchdog":
-            "BrokerId::Mqtt3" in read(root / "lib/MultiObserver/src/MOMQTT.cpp")
-            and "BrokerId::Mqtt3" in read(root / "lib/MultiObserver/src/MOWatchdog.cpp")
-            and "kMqtt3Bit" in read(root / "lib/MultiObserver/src/MOWatchdog.h"),
         "MOMQTT status": "publishStatus" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "MOMQTT LWT": "last_will" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "RAW publish": "mqtt_.publishRaw(raw)" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),
@@ -214,8 +207,7 @@ def main() -> int:
         and "[MO][PACKET] dir=tx" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),
         "startup logs": "[MO][MQTT1] runtime start" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "no literal newline escape": "\\n" not in (root / "lib/MultiObserver/src/MOMQTT.h").read_text(encoding="utf-8"),
-        "library manifest": manifest.get("name") == "MultiObserver"
-        and manifest.get("version") == "0.3.6",
+        "library manifest": manifest.get("name") == "MultiObserver",
         "Heltec environment layout": heltec_layout_ok,
         "PlatformIO MO dependency": "file://lib/MultiObserver" in repeater_section,
         "PlatformIO WiFiClientSecure ignore": re.search(

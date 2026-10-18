@@ -18,17 +18,8 @@ extern "C" esp_err_t esp_crt_bundle_attach(void* conf);
 
 namespace {
 
-constexpr std::array<MOMQTT::BrokerId, 3> kBrokerIds{
-    MOMQTT::BrokerId::Mqtt1, MOMQTT::BrokerId::Mqtt2,
-    MOMQTT::BrokerId::Mqtt3};
-
 const char* transportName(MOTransport transport) {
-  switch (transport) {
-    case MOTransport::Tcp: return "tcp";
-    case MOTransport::Wss: return "wss";
-    case MOTransport::Mqtts: return "mqtts";
-  }
-  return "tcp";
+  return transport == MOTransport::Wss ? "wss" : "tcp";
 }
 
 bool isEnabled(const MOBrokerPrefs& prefs) {
@@ -61,7 +52,7 @@ void MOMQTT::begin() {
     Serial.println("[MO][MQTT] event queue allocation failed");
     return;
   }
-  for (BrokerId broker : kBrokerIds) {
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     eventContexts_[index(broker)] = {this, broker, 0};
     runtime(brokers_, broker).state = State::Disconnected;
   }
@@ -69,7 +60,6 @@ void MOMQTT::begin() {
   running_ = true;
   Serial.println("[MO][MQTT1] runtime start");
   Serial.println("[MO][MQTT2] runtime start");
-  Serial.println("[MO][MQTT3] runtime start");
 }
 
 void MOMQTT::end() {
@@ -79,7 +69,6 @@ void MOMQTT::end() {
   }
   destroyBroker(BrokerId::Mqtt1);
   destroyBroker(BrokerId::Mqtt2);
-  destroyBroker(BrokerId::Mqtt3);
   vQueueDelete(eventQueue_);
   eventQueue_ = nullptr;
   running_ = false;
@@ -94,7 +83,7 @@ void MOMQTT::loop() {
   const uint32_t now = millis();
 
   if (!isNetworkReady()) {
-    for (BrokerId broker : kBrokerIds) {
+    for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
       BrokerRuntime& state = runtime(brokers_, broker);
       if (state.client != nullptr) destroyBroker(broker);
       const State next =
@@ -113,8 +102,9 @@ void MOMQTT::loop() {
     return;
   }
 
-  // Keep peak TLS heap usage bounded: only one broker handshake may be active.
-  for (BrokerId broker : kBrokerIds) {
+  // Keep peak TLS heap usage bounded: finish the current broker handshake
+  // before starting the other one.
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     BrokerRuntime& state = runtime(brokers_, broker);
 
     if (!isEnabled(prefs(prefs_, broker)) && !state.forcedEnabled) {
@@ -277,7 +267,7 @@ bool MOMQTT::publishPacket(const PacketData& packet) {
   if (!buildTopic("packets", topic, sizeof(topic))) return false;
 
   bool queued = false;
-  for (BrokerId broker : kBrokerIds) {
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     queued |= queuePublish(broker, topic, std::string_view(payload, length),
                             false);
   }
@@ -293,7 +283,7 @@ bool MOMQTT::publishRaw(const RawData& raw) {
   if (!buildTopic("raw", topic, sizeof(topic))) return false;
 
   bool queued = false;
-  for (BrokerId broker : kBrokerIds) {
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     queued |= queuePublish(broker, topic, std::string_view(payload, length),
                             false);
   }
@@ -310,7 +300,7 @@ bool MOMQTT::publishStatus(const StatusData& status, bool retain) {
   if (!buildTopic("status", topic, sizeof(topic))) return false;
 
   bool queued = false;
-  for (BrokerId broker : kBrokerIds) {
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     queued |= queuePublish(broker, topic, std::string_view(payload, length),
                             retain);
   }
@@ -425,7 +415,7 @@ void MOMQTT::onMqttEvent(void* handlerArg, esp_event_base_t eventBase,
 
 void MOMQTT::drainEvents() {
   const uint32_t overflow = eventOverflow_.exchange(0);
-  for (BrokerId broker : kBrokerIds) {
+  for (BrokerId broker : {BrokerId::Mqtt1, BrokerId::Mqtt2}) {
     if ((overflow & (1U << index(broker))) == 0) continue;
     Serial.printf("[MO][%s] event overflow: recover client\n", brokerName(broker));
     destroyBroker(broker);
@@ -706,24 +696,19 @@ void MOMQTT::clearRuntime(BrokerId broker) {
 }
 
 bool MOMQTT::hasConnectHeadroom(BrokerId broker) const {
-  size_t otherConnected = 0;
-  for (BrokerId candidate : kBrokerIds) {
-    if (candidate != broker && connected(candidate)) ++otherConnected;
-  }
-  if (otherConnected == 0) return true;
+  const bool otherConnected =
+      broker == BrokerId::Mqtt1 ? connected(BrokerId::Mqtt2)
+                               : connected(BrokerId::Mqtt1);
+  if (!otherConnected) return true;
 
   const size_t freeHeap =
       heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   const size_t largestHeap =
       heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
 
-  constexpr size_t kTwoBrokerMinFreeHeap = 80U * 1024U;
-  constexpr size_t kThreeBrokerMinFreeHeap = 128U * 1024U;
+  constexpr size_t kDualBrokerMinFreeHeap = 80U * 1024U;
   constexpr size_t kDualBrokerMinLargestHeap = 32U * 1024U;
-  const size_t requiredFreeHeap = otherConnected >= 2
-                                      ? kThreeBrokerMinFreeHeap
-                                      : kTwoBrokerMinFreeHeap;
-  return freeHeap >= requiredFreeHeap &&
+  return freeHeap >= kDualBrokerMinFreeHeap &&
          largestHeap >= kDualBrokerMinLargestHeap;
 }
 
@@ -767,11 +752,6 @@ bool MOMQTT::buildClientConfig(BrokerId broker,
           std::to_string(brokerPrefs.port) + "/mqtt";
     config.broker.address.uri = uri.c_str();
     config.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
-  } else if (brokerPrefs.transport == MOTransport::Mqtts) {
-    uri = "mqtts://" + brokerPrefs.host + ":" +
-          std::to_string(brokerPrefs.port);
-    config.broker.address.uri = uri.c_str();
-    config.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
   } else {
     config.broker.address.hostname = brokerPrefs.host.c_str();
     config.broker.address.port = brokerPrefs.port;
@@ -793,11 +773,6 @@ bool MOMQTT::buildClientConfig(BrokerId broker,
   if (brokerPrefs.transport == MOTransport::Wss) {
     uri = "wss://" + brokerPrefs.host + ":" +
           std::to_string(brokerPrefs.port) + "/mqtt";
-    config.uri = uri.c_str();
-    config.crt_bundle_attach = esp_crt_bundle_attach;
-  } else if (brokerPrefs.transport == MOTransport::Mqtts) {
-    uri = "mqtts://" + brokerPrefs.host + ":" +
-          std::to_string(brokerPrefs.port);
     config.uri = uri.c_str();
     config.crt_bundle_attach = esp_crt_bundle_attach;
   } else {
@@ -1014,24 +989,19 @@ bool MOMQTT::buildStatusJson(const StatusData& s, char* buffer,
 }
 
 MOMQTT::BrokerRuntime& MOMQTT::runtime(
-    std::array<BrokerRuntime, 3>& runtimes, BrokerId broker) noexcept {
+    std::array<BrokerRuntime, 2>& runtimes, BrokerId broker) noexcept {
   return runtimes[index(broker)];
 }
 
 const MOMQTT::BrokerRuntime& MOMQTT::runtime(
-    const std::array<BrokerRuntime, 3>& runtimes,
+    const std::array<BrokerRuntime, 2>& runtimes,
     BrokerId broker) noexcept {
   return runtimes[index(broker)];
 }
 
 const MOBrokerPrefs& MOMQTT::prefs(const MOMQTTPrefs& prefs,
                                     BrokerId broker) noexcept {
-  switch (broker) {
-    case BrokerId::Mqtt1: return prefs.mqtt1();
-    case BrokerId::Mqtt2: return prefs.mqtt2();
-    case BrokerId::Mqtt3: return prefs.mqtt3();
-  }
-  return prefs.mqtt1();
+  return broker == BrokerId::Mqtt1 ? prefs.mqtt1() : prefs.mqtt2();
 }
 
 size_t MOMQTT::index(BrokerId broker) noexcept {
@@ -1039,10 +1009,5 @@ size_t MOMQTT::index(BrokerId broker) noexcept {
 }
 
 const char* MOMQTT::brokerName(BrokerId broker) noexcept {
-  switch (broker) {
-    case BrokerId::Mqtt1: return "MQTT1";
-    case BrokerId::Mqtt2: return "MQTT2";
-    case BrokerId::Mqtt3: return "MQTT3";
-  }
-  return "MQTT?";
+  return broker == BrokerId::Mqtt1 ? "MQTT1" : "MQTT2";
 }

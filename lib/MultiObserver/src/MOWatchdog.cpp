@@ -14,8 +14,6 @@ void MOWatchdog::begin() {
     mqtt_.setRetryInterval(MOMQTT::BrokerId::Mqtt1, kPostRebootRetryMs);
   if (postRebootMask_ & kMqtt2Bit)
     mqtt_.setRetryInterval(MOMQTT::BrokerId::Mqtt2, kPostRebootRetryMs);
-  if (postRebootMask_ & kMqtt3Bit)
-    mqtt_.setRetryInterval(MOMQTT::BrokerId::Mqtt3, kPostRebootRetryMs);
   restartGrace();
   Serial.printf("[MO][WDG] start previous_mqtt_reboot=0x%02x grace=%us\n",
                 postRebootMask_, prefs_.graceSeconds());
@@ -42,7 +40,6 @@ void MOWatchdog::loop() {
     if (wifi_.healthy()) {
       checkBroker(MOMQTT::BrokerId::Mqtt1, mqtt1_, now);
       checkBroker(MOMQTT::BrokerId::Mqtt2, mqtt2_, now);
-      checkBroker(MOMQTT::BrokerId::Mqtt3, mqtt3_, now);
     }
   }
   checkReboot(now);
@@ -67,10 +64,8 @@ void MOWatchdog::restartGrace() noexcept {
   rebootAtMs_ = 0;
   mqtt1_ = {};
   mqtt2_ = {};
-  mqtt3_ = {};
   mqtt1_.postReboot = (postRebootMask_ & kMqtt1Bit) != 0;
   mqtt2_.postReboot = (postRebootMask_ & kMqtt2Bit) != 0;
-  mqtt3_.postReboot = (postRebootMask_ & kMqtt3Bit) != 0;
 }
 
 void MOWatchdog::setEnabled(bool enabled) noexcept {
@@ -172,9 +167,8 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
     // Do not report ordinary MQTT reconnection as ESP reboot recovery.
     const bool recovered = (postRebootMask_ & bit) != 0;
     if (recovered) {
-      char alert[24];
-      std::snprintf(alert, sizeof(alert), "%s.restore", brokerSlug(broker));
-      sendAlert(alert);
+      sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.restore"
+                                                   : "mqtt2.restore");
     }
     postRebootMask_ &= static_cast<uint8_t>(~bit);
     rebootBrokerMask_ &= static_cast<uint8_t>(~bit);
@@ -197,9 +191,8 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
     if (elapsed(now, recovery.nextActionMs) &&
         mqtt_.status(broker).state != MOMQTT::State::Connecting) {
       if (!recovery.down) {
-        char alert[24];
-        std::snprintf(alert, sizeof(alert), "%s.down", brokerSlug(broker));
-        sendAlert(alert);
+        sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "mqtt1.down"
+                                                     : "mqtt2.down");
         recovery.down = true;
       }
       mqtt_.restart(broker);
@@ -243,9 +236,8 @@ void MOWatchdog::checkBroker(MOMQTT::BrokerId broker,
     return;
   }
 
-  char alert[32];
-  std::snprintf(alert, sizeof(alert), "ESP restart.%s", brokerSlug(broker));
-  sendAlert(alert);
+  sendAlert(broker == MOMQTT::BrokerId::Mqtt1 ? "ESP restart.mqtt1"
+                                               : "ESP restart.mqtt2");
   scheduleReboot(bit, now);
 }
 
@@ -259,8 +251,7 @@ void MOWatchdog::scheduleReboot(uint8_t brokerBitValue, uint32_t now) {
 void MOWatchdog::checkReboot(uint32_t now) {
   if (rebootBrokerMask_ == 0 || !elapsed(now, rebootAtMs_)) return;
   for (MOMQTT::BrokerId broker : {MOMQTT::BrokerId::Mqtt1,
-                                  MOMQTT::BrokerId::Mqtt2,
-                                  MOMQTT::BrokerId::Mqtt3}) {
+                                  MOMQTT::BrokerId::Mqtt2}) {
     const uint8_t bit = brokerBit(broker);
     if ((rebootBrokerMask_ & bit) != 0 &&
         (!brokerConfigured(broker) || !brokerReady(broker) ||
@@ -275,11 +266,9 @@ void MOWatchdog::checkReboot(uint32_t now) {
   if (!prefs_.markWatchdogReboot(rebootBrokerMask_)) {
     Serial.println("[MO][WDG] reboot cancelled: cannot persist recovery state");
     for (MOMQTT::BrokerId broker : {MOMQTT::BrokerId::Mqtt1,
-                                    MOMQTT::BrokerId::Mqtt2,
-                                    MOMQTT::BrokerId::Mqtt3}) {
+                                    MOMQTT::BrokerId::Mqtt2}) {
       if ((rebootBrokerMask_ & brokerBit(broker)) != 0) {
-        BrokerRecovery& recovery = broker == MOMQTT::BrokerId::Mqtt1 ? mqtt1_
-            : broker == MOMQTT::BrokerId::Mqtt2 ? mqtt2_ : mqtt3_;
+        BrokerRecovery& recovery = broker == MOMQTT::BrokerId::Mqtt1 ? mqtt1_ : mqtt2_;
         recovery.postReboot = true;
         recovery.nextActionMs = now + kPostRebootRetryMs;
         mqtt_.setRetryInterval(broker, kPostRebootRetryMs);
@@ -319,43 +308,22 @@ const char* MOWatchdog::phaseName(Phase phase) noexcept {
 }
 
 const char* MOWatchdog::brokerName(MOMQTT::BrokerId broker) noexcept {
-  switch (broker) {
-    case MOMQTT::BrokerId::Mqtt1: return "MQTT1";
-    case MOMQTT::BrokerId::Mqtt2: return "MQTT2";
-    case MOMQTT::BrokerId::Mqtt3: return "MQTT3";
-  }
-  return "MQTT?";
-}
-
-const char* MOWatchdog::brokerSlug(MOMQTT::BrokerId broker) noexcept {
-  switch (broker) {
-    case MOMQTT::BrokerId::Mqtt1: return "mqtt1";
-    case MOMQTT::BrokerId::Mqtt2: return "mqtt2";
-    case MOMQTT::BrokerId::Mqtt3: return "mqtt3";
-  }
-  return "mqtt?";
+  return broker == MOMQTT::BrokerId::Mqtt1 ? "MQTT1" : "MQTT2";
 }
 
 uint8_t MOWatchdog::brokerBit(MOMQTT::BrokerId broker) noexcept {
-  switch (broker) {
-    case MOMQTT::BrokerId::Mqtt1: return kMqtt1Bit;
-    case MOMQTT::BrokerId::Mqtt2: return kMqtt2Bit;
-    case MOMQTT::BrokerId::Mqtt3: return kMqtt3Bit;
-  }
-  return 0;
+  return broker == MOMQTT::BrokerId::Mqtt1 ? kMqtt1Bit : kMqtt2Bit;
 }
 
 void MOWatchdog::formatStatus(char* output, size_t outputSize) const noexcept {
   if (output == nullptr || outputSize == 0) return;
   std::snprintf(output, outputSize,
-                 "WDG %s phase=%s wifi=%s mqtt1=%s mqtt2=%s mqtt3=%s reboot=%s",
+                "WDG %s phase=%s wifi=%s mqtt1=%s mqtt2=%s reboot=%s",
                 prefs_.watchdogEnabled() ? "ON" : "OFF",
                 phaseName(phase_), wifi_.healthy() ? "UP" : "DOWN",
                 !brokerConfigured(MOMQTT::BrokerId::Mqtt1) ? "OFF" :
                     (brokerConnected(MOMQTT::BrokerId::Mqtt1) ? "UP" : "DOWN"),
                 !brokerConfigured(MOMQTT::BrokerId::Mqtt2) ? "OFF" :
                     (brokerConnected(MOMQTT::BrokerId::Mqtt2) ? "UP" : "DOWN"),
-                !brokerConfigured(MOMQTT::BrokerId::Mqtt3) ? "OFF" :
-                    (brokerConnected(MOMQTT::BrokerId::Mqtt3) ? "UP" : "DOWN"),
                 rebootBrokerMask_ != 0 ? "PENDING" : "NO");
 }

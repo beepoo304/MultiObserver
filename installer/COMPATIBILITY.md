@@ -11,8 +11,8 @@ Installer target: `examples/simple_repeater`.
 | 1.17.1 | compatible |
 | 1.18.0 | test candidate; compile and device tests pending |
 
-The MeshCore 1.18.0 source tree was checked against the installer's structural
-integration points before enabling the 1.18.x candidate.
+The three supplied source archives were inspected before implementing the
+installer.
 
 The same structural integration points are present in all three:
 

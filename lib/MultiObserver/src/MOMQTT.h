@@ -21,7 +21,6 @@ class MOMQTT {
   enum class BrokerId : uint8_t {
     Mqtt1 = 0,
     Mqtt2 = 1,
-    Mqtt3 = 2,
   };
 
   enum class State : uint8_t {
@@ -207,10 +206,10 @@ class MOMQTT {
   static bool appendEscaped(char* buffer, size_t bufferSize, size_t& used,
                             std::string_view value);
 
-  static BrokerRuntime& runtime(std::array<BrokerRuntime, 3>& runtimes,
+  static BrokerRuntime& runtime(std::array<BrokerRuntime, 2>& runtimes,
                                 BrokerId broker) noexcept;
   static const BrokerRuntime& runtime(
-      const std::array<BrokerRuntime, 3>& runtimes,
+      const std::array<BrokerRuntime, 2>& runtimes,
       BrokerId broker) noexcept;
 
   static const MOBrokerPrefs& prefs(const MOMQTTPrefs& prefs,
@@ -222,8 +221,8 @@ class MOMQTT {
   std::string observerId_;
   MOMQTTPrefs& prefs_;
   MOWifi& wifi_;
-  std::array<BrokerRuntime, 3> brokers_{};
-  std::array<EventContext, 3> eventContexts_{};
+  std::array<BrokerRuntime, 2> brokers_{};
+  std::array<EventContext, 2> eventContexts_{};
   QueueHandle_t eventQueue_{nullptr};
   std::atomic<uint32_t> eventOverflow_{0};
   struct StoredStatus {
