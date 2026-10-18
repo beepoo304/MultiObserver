@@ -1,6 +1,6 @@
 {
   "name": "MultiObserver",
-  "version": "0.3.4",
+  "version": "0.3.6",
   "description": "MultiObserver extension for the MeshCore simple repeater",
   "keywords": [
     "meshcore",

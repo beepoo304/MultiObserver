@@ -6,6 +6,7 @@ SUPPORTED = {
     "1.15": "MeshCore 1.15.x",
     "1.16": "MeshCore 1.16.x",
     "1.17": "MeshCore 1.17.x",
+    "1.18": "MeshCore 1.18.x (test candidate)",
 }
 
 MARKERS = {

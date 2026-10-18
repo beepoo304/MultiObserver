@@ -4,7 +4,7 @@ This document is the compact command reference for the MultiObserver commands
 implemented by `MOCli`. It covers MultiObserver only; the upstream MeshCore
 repeater may provide additional commands of its own.
 
-The reference applies to MultiObserver v0.3.x and contains 44 commands.
+The reference applies to MultiObserver v0.3.x and contains 55 commands.
 
 ## Opening the CLI
 
@@ -63,6 +63,7 @@ probe.
 | `set mqtt1.host <hostname>` | `OK` / `ERR` | Save a non-empty hostname and restart MQTT1. Do not include a URI scheme. |
 | `set mqtt1.port <1-65535>` | `OK` / `ERR` | Save a numeric TCP port and restart MQTT1. |
 | `set mqtt1.transport tcp` | `OK` / `ERR` | Use direct MQTT over TCP and restart MQTT1. |
+| `set mqtt1.transport mqtts` | `OK` / `ERR` | Use direct MQTT over TLS and restart MQTT1. |
 | `set mqtt1.transport wss` | `OK` / `ERR` | Use MQTT over secure WebSocket/TLS and restart MQTT1. The URI path is `/mqtt`. |
 | `set mqtt1.username <username>` | `OK` / `ERR` | Save a non-empty username and restart MQTT1. |
 | `set mqtt1.pwd <password>` | `OK` / `ERR` | Save a non-empty password and restart MQTT1. |
@@ -81,17 +82,38 @@ same command structure as MQTT1.
 | `set mqtt2.host <hostname>` | `OK` / `ERR` | Save a non-empty hostname and restart MQTT2. Do not include a URI scheme. |
 | `set mqtt2.port <1-65535>` | `OK` / `ERR` | Save a numeric TCP port and restart MQTT2. |
 | `set mqtt2.transport tcp` | `OK` / `ERR` | Use direct MQTT over TCP and restart MQTT2. |
+| `set mqtt2.transport mqtts` | `OK` / `ERR` | Use direct MQTT over TLS and restart MQTT2. |
 | `set mqtt2.transport wss` | `OK` / `ERR` | Use MQTT over secure WebSocket/TLS and restart MQTT2. The URI path is `/mqtt`. |
 | `set mqtt2.username <username>` | `OK` / `ERR` | Save a non-empty username and restart MQTT2. |
 | `set mqtt2.pwd <password>` | `OK` / `ERR` | Save a non-empty password and restart MQTT2. |
 | `get mqtt2.status` | status line | Show ON/OFF, runtime state, host, reconnect-failure count and last error code. |
 | `restart.mqtt2` | `OK` | Restart only MQTT2 using all saved settings. |
 
+## MQTT broker 3 commands
+
+MQTT3 has an independent configuration and runtime state, with the same
+command set as MQTT1 and MQTT2. The firmware starts with editable marwoj
+MQTT/TLS values in this slot; these are normal settings, not a locked preset.
+
+| Command | Reply | Description |
+| --- | --- | --- |
+| `set mqtt3.on` | `OK` / `ERR` | Persistently enable MQTT3 and start/restart its client. |
+| `set mqtt3.off` | `OK` / `ERR` | Persistently disable MQTT3 and disconnect its client. |
+| `set mqtt3.host <hostname>` | `OK` / `ERR` | Save a non-empty hostname and restart MQTT3. Do not include a URI scheme. |
+| `set mqtt3.port <1-65535>` | `OK` / `ERR` | Save a numeric port and restart MQTT3. |
+| `set mqtt3.transport tcp` | `OK` / `ERR` | Use unencrypted direct MQTT over TCP and restart MQTT3. |
+| `set mqtt3.transport mqtts` | `OK` / `ERR` | Use MQTT over TLS and restart MQTT3. |
+| `set mqtt3.transport wss` | `OK` / `ERR` | Use secure MQTT over WebSocket/TLS and restart MQTT3. The URI path is `/mqtt`. |
+| `set mqtt3.username <username>` | `OK` / `ERR` | Save a non-empty username and restart MQTT3. |
+| `set mqtt3.pwd <password>` | `OK` / `ERR` | Save a non-empty password and restart MQTT3. |
+| `get mqtt3.status` | status line | Show ON/OFF, runtime state, host, reconnect-failure count and last error code. |
+| `restart.mqtt3` | `OK` | Restart only MQTT3 using all saved settings. |
+
 Possible MQTT runtime states are `DISABLED`, `WAITING_WIFI`, `WAITING_TIME`,
 `DISCONNECTED`, `CONNECTING`, `CONNECTED`, `BACKOFF` and `ERROR`.
 
 An MQTT broker is supervised by WDG only when it is enabled and has a valid
-host and port. While Wi-Fi is down, both brokers are treated as dependent
+host and port. While Wi-Fi is down, all brokers are treated as dependent
 services and their independent escalation timers do not advance.
 
 ## Observer location / IATA commands

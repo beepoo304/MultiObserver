@@ -1,6 +1,7 @@
 // Runs the real MQTT/watchdog implementation against fake time, MQTT, Wi-Fi
 // and storage. No broker, device, credentials or network access is needed.
 #include <array>
+#include <algorithm>
 #include <atomic>
 #include <string>
 #include <string_view>
@@ -31,6 +32,8 @@ const MOBrokerPrefs& MOMQTTPrefs::mqtt1() const noexcept { return mqtt1_; }
 MOBrokerPrefs& MOMQTTPrefs::mqtt1() noexcept { return mqtt1_; }
 const MOBrokerPrefs& MOMQTTPrefs::mqtt2() const noexcept { return mqtt2_; }
 MOBrokerPrefs& MOMQTTPrefs::mqtt2() noexcept { return mqtt2_; }
+const MOBrokerPrefs& MOMQTTPrefs::mqtt3() const noexcept { return mqtt3_; }
+MOBrokerPrefs& MOMQTTPrefs::mqtt3() noexcept { return mqtt3_; }
 const std::string& MOMQTTPrefs::iata() const noexcept { return iata_; }
 bool MOEtap2Prefs::watchdogEnabled() const noexcept { return watchdogEnabled_; }
 uint16_t MOEtap2Prefs::graceSeconds() const noexcept { return graceSeconds_; }
@@ -47,13 +50,14 @@ struct Fixture {
   MOMQTT mqtt{prefs, wifi};
   MOEtap2Prefs wdPrefs;
   MOWatchdog wdg{wdPrefs, wifi, mqtt};
-  Fixture(bool dual = false) {
+  Fixture(bool dual = false, bool third = false) {
     fakeMs = 1000; linkUp = timeReady = markerWritable = true; bootMarkerMask = 0;
     wifiRestarts = 0; alerts.clear();
     fakeHeap = 120 * 1024; fakeStartResult = ESP_OK;
     prefs.mqtt1().state = MOOnOff::On;
     prefs.mqtt1().host = "broker1.invalid";
     if (dual) { prefs.mqtt2().state = MOOnOff::On; prefs.mqtt2().host = "broker2.invalid"; }
+    if (third) { prefs.mqtt3().state = MOOnOff::On; prefs.mqtt3().host = "broker3.invalid"; }
     prefs.iata_ = "TST";
     mqtt.setObserverIdentity("test-observer");
     mqtt.begin();
@@ -114,6 +118,30 @@ void networkAndHeapRecovery() {
   fakeHeap = 40000; f.mqtt.loop(); assert(!f.client(1));
   fakeHeap = 120 * 1024; fakeMs += 180000; f.mqtt.loop(); assert(f.client(1));
 }
+void thirdBrokerConnectionPublishingAndReconnect() {
+  Fixture f(false, true);
+  f.prefs.mqtt1().state = MOOnOff::Off;
+  f.mqtt.loop();
+  assert(f.client(2) != nullptr);
+  auto* first = f.client(2);
+  emit(first, MQTT_EVENT_CONNECTED);
+  f.mqtt.loop();
+  assert(f.mqtt.connected(Broker::Mqtt3));
+
+  const int before = publishes;
+  MOMQTT::StatusData status{};
+  status.status = "online";
+  status.originId = "test-observer";
+  assert(f.mqtt.publishStatus(status));
+  assert(publishes == before + 1);
+
+  emit(first, MQTT_EVENT_DISCONNECTED);
+  f.mqtt.loop();
+  assert(first->destroyed && !f.client(2));
+  fakeMs += 180'000;
+  f.mqtt.loop();
+  assert(f.client(2) != nullptr && f.client(2) != first);
+}
 void callbackPublishingAndOverflow() {
   Fixture f; f.mqtt.setStatusSnapshot({}); int before = publishes;
   f.mqtt.loop(); emit(f.client(), MQTT_EVENT_CONNECTED);
@@ -138,13 +166,70 @@ void simultaneousRebootOwners() {
   bool rebooted = false; try { f.advance(30'000); } catch (RebootRequested&) { rebooted = true; }
   assert(rebooted && bootMarkerMask == 3);
 }
+void mqtt3WatchdogRecoveryAndAlertChannelStatus() {
+  Fixture f(false, true);
+  f.prefs.mqtt1().state = MOOnOff::Off;
+  f.startWatchdog();
+  assert(f.wdg.mqtt3_.attempts == 1);
+  f.advance(3 * 60'000);
+  assert(f.wdg.mqtt3_.attempts == 2);
+  f.advance(3 * 60'000);
+  assert(f.wdg.mqtt3_.attempts == 3);
+  f.advance(3 * 60'000);
+  assert(f.wdg.rebootBrokerMask_ == MOWatchdog::kMqtt3Bit);
+  assert(alerts.back() == "ESP restart.mqtt3");
+  bool rebooted = false;
+  try { f.advance(30'000); } catch (RebootRequested&) { rebooted = true; }
+  assert(rebooted && bootMarkerMask == MOWatchdog::kMqtt3Bit);
+
+  // On the next boot, the marker is consumed once. If MQTT3 is still down,
+  // WDG reports it and schedules bounded retries without another reboot loop.
+  f.startWatchdog();
+  f.advance(15'000);
+  assert(alerts.back() == "mqtt3.down");
+  assert(f.wdg.rebootBrokerMask_ == 0);
+  f.healthy(2);
+  f.advance(5'000);
+  assert(alerts.back() == "mqtt3.restore");
+
+  char status[128]{};
+  f.wdg.formatStatus(status, sizeof(status));
+  assert(std::string(status).find("mqtt3=UP") != std::string::npos);
+}
 void recoveredServiceCancelsReboot() {
   Fixture f; f.startWatchdog();
   f.advance(3 * 60'000); f.advance(3 * 60'000); f.advance(3 * 60'000);
   assert(f.wdg.rebootBrokerMask_ == 1);
   f.healthy(0); f.advance(30'000);
-  assert(f.wdg.rebootBrokerMask_ == 0 && alerts.back() == "mqtt1.restore");
+  assert(f.wdg.rebootBrokerMask_ == 0);
+  assert(alerts.back() != "mqtt1.restore");
 }
+
+void ordinaryReconnectDoesNotEmitRestore() {
+  Fixture f; f.startWatchdog();
+  alerts.clear();
+  f.wdg.mqtt1_.down = true;
+  f.healthy(0);
+  f.advance(5'000);
+  assert(std::find(alerts.begin(), alerts.end(), "mqtt1.restore") == alerts.end());
+}
+void manualGraceResetDoesNotEmitNewStart() {
+  Fixture f; f.startWatchdog();
+  alerts.clear();
+  f.wdg.restartGrace();
+  f.advance(static_cast<uint32_t>(f.wdPrefs.graceSeconds()) * 1000U);
+  assert(std::find(alerts.begin(), alerts.end(), "AlertChannel newStart") == alerts.end());
+}
+
+void actualBootEmitsNewStartOnce() {
+  Fixture f;
+  f.startWatchdog();
+  assert(std::count(alerts.begin(), alerts.end(), "AlertChannel newStart") == 1);
+  f.wdg.restartGrace();
+  f.advance(static_cast<uint32_t>(f.wdPrefs.graceSeconds()) * 1000U);
+  assert(std::count(alerts.begin(), alerts.end(), "AlertChannel newStart") == 1);
+}
+
 void storageFailureCannotVetoReboot() {
   Fixture f; f.startWatchdog();
   f.advance(3 * 60'000); f.advance(3 * 60'000); f.advance(3 * 60'000);
@@ -164,14 +249,14 @@ void postRebootRetriesDoNotLoop() {
 void wifiRestartAndNoReboot() {
   Fixture f; f.startWatchdog(); linkUp = false;
   f.advance(5'000); f.advance(30'000); assert(wifiRestarts == 1 && f.wdg.rebootBrokerMask_ == 0);
-  f.advance(3 * 60'000); assert(wifiRestarts == 1);
+  f.advance(3 * 60'000); assert(wifiRestarts == 2);
   linkUp = true; f.advance(5'000); linkUp = false;
   f.advance(5'000); f.advance(30'000);
-  assert(wifiRestarts == 2);
+  assert(wifiRestarts == 3);
 }
 void statusLabelsAndDisable() {
   Fixture f; f.startWatchdog(); char text[128]; f.wdg.formatStatus(text, sizeof(text));
-  assert(std::string(text).find("phase=NORMAL wifi=UP mqtt1=DOWN mqtt2=OFF reboot=NO") != std::string::npos);
+  assert(std::string(text).find("phase=NORMAL wifi=UP mqtt1=DOWN mqtt2=OFF mqtt3=OFF reboot=NO") != std::string::npos);
   f.wdg.setEnabled(false); f.advance(10 * 60'000); assert(f.wdg.rebootBrokerMask_ == 0);
 }
 
@@ -181,12 +266,17 @@ int main() {
   auto run = [&](const char* name, auto test) { std::cout << "RUN " << name << '\n'; test(); ++count; std::cout << "PASS " << name << '\n'; };
   run("disconnect retries at deadline", reconnectAfterDisconnect);
   run("ERROR/DISCONNECTED dedup and old event isolation", failedAttemptAndStaleEvents);
-  run("two brokers, timeout and disabled profile", timeoutDualAndDisabled);
+  run("multiple brokers, timeout and disabled profile", timeoutDualAndDisabled);
   run("Wi-Fi, NTP and heap recovery", networkAndHeapRecovery);
+  run("MQTT3 connection, telemetry publication and reconnect", thirdBrokerConnectionPublishingAndReconnect);
   run("callback isolation and bounded queue overflow recovery", callbackPublishingAndOverflow);
   run("millis rollover and bounded backoff", rolloverAndBackoff);
   run("two failed brokers retain independent reboot causes", simultaneousRebootOwners);
+  run("MQTT3 watchdog, AlertChannel alerts and post-reboot recovery", mqtt3WatchdogRecoveryAndAlertChannelStatus);
   run("recovery cancels no-longer-needed reboot", recoveredServiceCancelsReboot);
+  run("ordinary MQTT reconnect does not emit restore", ordinaryReconnectDoesNotEmitRestore);
+  run("manual grace reset does not emit newStart", manualGraceResetDoesNotEmitNewStart);
+  run("actual ESP boot emits newStart exactly once", actualBootEmitsNewStartOnce);
   run("storage failure cannot suppress reboot", storageFailureCannotVetoReboot);
   run("post-reboot retries do not reboot-loop", postRebootRetriesDoNotLoop);
   run("Wi-Fi restart after 30s never reboots ESP", wifiRestartAndNoReboot);

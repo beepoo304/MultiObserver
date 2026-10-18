@@ -2,11 +2,11 @@
 
 MultiObserver is an open-source observer extension for **MeshCore Repeater**.
 It is designed as a reusable, application-level library that adds Wi-Fi and
-dual-broker MQTT observation to a MeshCore repeater without replacing or
+three-slot MQTT observation to a MeshCore repeater without replacing or
 forking MeshCore core functionality.
 
 The observer receives repeater traffic, publishes packet and status telemetry
-to up to two independently configured MQTT brokers, and exposes persistent
+to up to three independently configured MQTT brokers, and exposes persistent
 network configuration through the standard MeshCore CLI. It supports secure
 MQTT-over-WebSocket connections (WSS/TLS), making it suitable for community or
 private telemetry backends.
@@ -21,6 +21,11 @@ been validated with the `Heltec_v3_repeater` environment for:
 | 1.15.0 | Installer verified and firmware builds successfully |
 | 1.16.0 | Installer verified and firmware builds successfully |
 | 1.17.1 | Installer verified and firmware builds successfully |
+| 1.18.0 | Test candidate — compile and hardware validation pending |
+
+**MeshCore 1.18.0 is a test candidate only.** The installer enables the 1.18.x
+version family after checking the known integration anchors. Compilation and
+device validation are pending; do not treat this as a production release.
 
 The integration deliberately keeps MeshCore core code intact. The installer
 adds only the minimal build and application hooks; `MOBridge` is the thin
@@ -28,7 +33,7 @@ adapter between the repeater application and the MultiObserver library.
 
 ## What MultiObserver provides
 
-- **Two independent MQTT broker profiles** with separate host, port,
+- **Three independent MQTT broker profiles** with separate host, port,
   transport, username, password and enable/disable settings.
 - **Wi-Fi and MQTT configuration through the MeshCore CLI**, stored persistently
   on the device.
@@ -51,16 +56,16 @@ MeshCore Repeater releases listed above.
 
 Implemented runtime mechanisms include:
 
-- persistent WiFi and dual-MQTT WSS/TLS configuration through the MeshCore CLI
+- persistent WiFi and three-slot MQTT configuration through the MeshCore CLI
 - explicit WiFi, SNTP and MQTT state machines with transition diagnostics
 - MQTT connection gating on both WiFi connectivity and sane system time
 - bounded reconnect backoff, heap headroom checks and ESP-TLS error reporting
-- packet, RAW and periodic status publication to both enabled brokers
+- packet, RAW and periodic status publication to every enabled broker
 - one-line RX/TX packet diagnostics in the serial monitor
 - EastMesh-style 60-second battery sampling cache for Heltec V3 GPIO37
 - non-blocking visible packet pulse on the Heltec V3 white GPIO35 LED
 - WiFi IP address on the Heltec OLED status screen
-- staged Wi-Fi, MQTT1 and MQTT2 supervision with one-shot reboot attribution
+- staged Wi-Fi and independent MQTT1/MQTT2/MQTT3 supervision with one-shot reboot attribution
 - 128-bit and 256-bit private MeshCore AlertChannel keys
 - private-channel Remote CLI without a duplicate parser or radio queue
 
@@ -272,6 +277,13 @@ set mqtt2.port 8883
 set mqtt2.transport tcp
 set mqtt2.username YourMqttUser
 set mqtt2.pwd YourMqttPassword
+
+set mqtt3.host mqtt.example.org
+set mqtt3.port 8883
+set mqtt3.transport mqtts
+set mqtt3.username YourMqttUser
+set mqtt3.pwd YourMqttPassword
+set mqtt3.on
 ```
 
 Verify the current configuration and connection state with:
@@ -280,6 +292,7 @@ Verify the current configuration and connection state with:
 get wifi.status
 get mqtt1.status
 get mqtt2.status
+get mqtt3.status
 ```
 
 Configuration is retained on the device. Restart Wi-Fi or an individual
@@ -289,6 +302,7 @@ broker after changing settings when needed:
 restart.wifi
 restart.mqtt1
 restart.mqtt2
+restart.mqtt3
 ```
 
 ## MultiObserver CLI command reference
@@ -296,7 +310,7 @@ restart.mqtt2
 Enter these commands in the MeshCore serial monitor. All settings are saved
 persistently. Commands and values are case-sensitive where shown.
 
-For a standalone operational reference containing all 41 MultiObserver
+For a standalone operational reference containing all 55 MultiObserver
 commands, replies, validation rules and a safe first-configuration sequence,
 see [CLI_REFERENCE.md](CLI_REFERENCE.md).
 
@@ -319,6 +333,7 @@ see [CLI_REFERENCE.md](CLI_REFERENCE.md).
 | `set mqtt1.host <hostname>` | Set the broker hostname. |
 | `set mqtt1.port <1-65535>` | Set the broker port. |
 | `set mqtt1.transport tcp` | Use direct MQTT over TCP. |
+| `set mqtt1.transport mqtts` | Use direct MQTT over TLS. |
 | `set mqtt1.transport wss` | Use secure MQTT over WebSocket (WSS/TLS). |
 | `set mqtt1.username <username>` | Set the MQTT username. |
 | `set mqtt1.pwd <password>` | Set the MQTT password. |
@@ -327,7 +342,8 @@ see [CLI_REFERENCE.md](CLI_REFERENCE.md).
 
 ### MQTT broker 2
 
-Broker 2 uses the same commands as broker 1. Replace `mqtt1` with `mqtt2`:
+Broker 2 and broker 3 use the same commands as broker 1. Replace `mqtt1` with
+`mqtt2` or `mqtt3`:
 
 | Command | Description |
 | --- | --- |
@@ -335,11 +351,17 @@ Broker 2 uses the same commands as broker 1. Replace `mqtt1` with `mqtt2`:
 | `set mqtt2.host <hostname>` | Set the broker hostname. |
 | `set mqtt2.port <1-65535>` | Set the broker port. |
 | `set mqtt2.transport tcp` | Use direct MQTT over TCP. |
+| `set mqtt2.transport mqtts` | Use direct MQTT over TLS. |
 | `set mqtt2.transport wss` | Use secure MQTT over WebSocket (WSS/TLS). |
 | `set mqtt2.username <username>` | Set the MQTT username. |
 | `set mqtt2.pwd <password>` | Set the MQTT password. |
 | `get mqtt2.status` | Show broker 2 connection and diagnostic state. |
 | `restart.mqtt2` | Restart broker 2 using the saved settings. |
+
+Broker 3 also supports `tcp`, `mqtts` and `wss` transports and the same enable,
+disable, host, port, username, password, status and restart commands. Its
+initial marwoj values are editable settings in the third slot, not a locked
+preset.
 
 ### Observer location / IATA code
 
@@ -371,14 +393,14 @@ Wi-Fi is checked every 5 seconds. If it remains unhealthy for 30 seconds, WDG
 restarts Wi-Fi once; the Wi-Fi manager then retries every 3 minutes. A Wi-Fi
 outage alone never reboots the ESP.
 
-MQTT1 and MQTT2 are handled independently while Wi-Fi is healthy. When a broker
+MQTT1, MQTT2 and MQTT3 are handled independently while Wi-Fi is healthy. When a broker
 disconnects, WDG restarts only that MQTT client and makes up to three
 connection attempts, spaced 3 minutes apart. If all three fail, it queues
-`ESP restart.mqtt1` or `ESP restart.mqtt2`, waits 30 seconds, then reboots once.
+`ESP restart.mqtt1`, `ESP restart.mqtt2` or `ESP restart.mqtt3`, waits 30 seconds, then reboots once.
 The affected broker mask is saved before reboot so a failed recovery cannot
 cause a reboot loop. After the startup grace period, a broker still down reports
-`mqtt1.down` or `mqtt2.down` and retries every 5 minutes. When it reconnects,
-WDG queues one matching `mqtt1.restore` or `mqtt2.restore` alert, then returns
+`mqtt1.down`, `mqtt2.down` or `mqtt3.down` and retries every 5 minutes. When it reconnects,
+WDG queues one matching `mqtt1.restore`, `mqtt2.restore` or `mqtt3.restore` alert, then returns
 that broker to the normal 3-minute retry interval. Recovery cancels only that
 broker's pending reboot request.
 
@@ -395,13 +417,13 @@ serialized to limit TLS memory use.
 
 MQTT callbacks only enqueue bounded event copies. The main loop owns state
 changes, publication and client destruction. This also avoids cross-client MQTT
-locks when both brokers connect together. Events from retired clients are ignored;
+locks when multiple brokers connect together. Events from retired clients are ignored;
 queue overflow triggers controlled recovery of the affected client.
 
 Runtime regression tests compile the actual `MOMQTT.cpp` and `MOWatchdog.cpp`
 against fake MQTT, Wi-Fi, storage and time: `python tests/runtime/run.py`.
 Set `CXX` or pass `--compiler`; Zig is also supported. These tests exercise
-reconnection, duplicate error events, timeouts, both brokers, Wi-Fi/NTP loss,
+reconnection, duplicate error events, timeouts, all three brokers, Wi-Fi/NTP loss,
 memory gating, stale callbacks, queue overflow, timer rollover, reboot ownership,
 storage failure and bounded post-reboot cooldown. They do not replace device tests.
 

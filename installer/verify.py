@@ -8,14 +8,14 @@ import sys
 from pathlib import Path
 
 
-SUPPORTED = {"1.15", "1.16", "1.17"}
+SUPPORTED = {"1.15", "1.16", "1.17", "1.18"}
 MAIN_MARKER = "MULTIOBSERVER: lifecycle integration v2"
 H_MARKER = "MULTIOBSERVER: bridge declaration v2"
 CPP_MARKER = "MULTIOBSERVER: mesh hooks v2"
 CPP17_SCRIPT = "scripts/multiobserver_cpp17.py"
 LIBRARY_MANIFEST = "lib/MultiObserver/library.json"
 
-HELTEC_V3_117_ENVS = {
+HELTEC_V3_EXPECTED_ENVS = {
     "Heltec_v3_repeater",
     "Heltec_v3_repeater_bridge_rs232",
     "Heltec_v3_repeater_bridge_espnow",
@@ -139,7 +139,7 @@ def main() -> int:
         raise VerifyError(f"Invalid MultiObserver library manifest: {exc}") from exc
 
     heltec_envs = set(re.findall(r"^\[env:([^\]]+)\]", platformio, re.MULTILINE))
-    heltec_layout_ok = v != "1.17" or HELTEC_V3_117_ENVS.issubset(heltec_envs)
+    heltec_layout_ok = v not in {"1.17", "1.18"} or HELTEC_V3_EXPECTED_ENVS.issubset(heltec_envs)
 
     checks = {
         "version": v in SUPPORTED,
@@ -200,6 +200,13 @@ def main() -> int:
         "remote CLI settings": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
             "get rcli.status", "rcli.on", "rcli.off",
         )),
+        "third MQTT broker CLI": all(command in read(root / "lib/MultiObserver/src/MOCli.cpp") for command in (
+            "set mqtt3.", "get mqtt3.", "restart.mqtt3",
+        )),
+        "third MQTT broker runtime and watchdog":
+            "BrokerId::Mqtt3" in read(root / "lib/MultiObserver/src/MOMQTT.cpp")
+            and "BrokerId::Mqtt3" in read(root / "lib/MultiObserver/src/MOWatchdog.cpp")
+            and "kMqtt3Bit" in read(root / "lib/MultiObserver/src/MOWatchdog.h"),
         "MOMQTT status": "publishStatus" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "MOMQTT LWT": "last_will" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "RAW publish": "mqtt_.publishRaw(raw)" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),
@@ -207,7 +214,8 @@ def main() -> int:
         and "[MO][PACKET] dir=tx" in (root / "lib/MultiObserver/src/MO.cpp").read_text(encoding="utf-8"),
         "startup logs": "[MO][MQTT1] runtime start" in (root / "lib/MultiObserver/src/MOMQTT.cpp").read_text(encoding="utf-8"),
         "no literal newline escape": "\\n" not in (root / "lib/MultiObserver/src/MOMQTT.h").read_text(encoding="utf-8"),
-        "library manifest": manifest.get("name") == "MultiObserver",
+        "library manifest": manifest.get("name") == "MultiObserver"
+        and manifest.get("version") == "0.3.6",
         "Heltec environment layout": heltec_layout_ok,
         "PlatformIO MO dependency": "file://lib/MultiObserver" in repeater_section,
         "PlatformIO WiFiClientSecure ignore": re.search(
