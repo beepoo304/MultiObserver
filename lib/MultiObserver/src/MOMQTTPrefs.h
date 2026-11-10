@@ -11,6 +11,7 @@ enum class MOOnOff : uint8_t {
 enum class MOTransport : uint8_t {
   Tcp = 0,
   Wss = 1,
+  Mqtts = 2,
 };
 
 struct MOBrokerPrefs {
@@ -34,11 +35,15 @@ class MOMQTTPrefs {
   [[nodiscard]] const MOBrokerPrefs& mqtt2() const noexcept;
   [[nodiscard]] MOBrokerPrefs& mqtt2() noexcept;
 
+  [[nodiscard]] const MOBrokerPrefs& mqtt3() const noexcept;
+  [[nodiscard]] MOBrokerPrefs& mqtt3() noexcept;
+
   [[nodiscard]] const std::string& iata() const noexcept;
   void setIata(std::string value);
 
  private:
   MOBrokerPrefs mqtt1_;
   MOBrokerPrefs mqtt2_;
+  MOBrokerPrefs mqtt3_;
   std::string iata_;
 };

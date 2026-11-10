@@ -11,6 +11,25 @@ namespace {
 
 constexpr size_t kMaxCommandLength = 159;
 
+const MOBrokerPrefs& brokerPrefs(const MOMQTTPrefs& prefs,
+                                 MOMQTT::BrokerId broker) {
+  switch (broker) {
+    case MOMQTT::BrokerId::Mqtt1: return prefs.mqtt1();
+    case MOMQTT::BrokerId::Mqtt2: return prefs.mqtt2();
+    case MOMQTT::BrokerId::Mqtt3: return prefs.mqtt3();
+  }
+  return prefs.mqtt1();
+}
+
+MOBrokerPrefs& brokerPrefs(MOMQTTPrefs& prefs, MOMQTT::BrokerId broker) {
+  switch (broker) {
+    case MOMQTT::BrokerId::Mqtt1: return prefs.mqtt1();
+    case MOMQTT::BrokerId::Mqtt2: return prefs.mqtt2();
+    case MOMQTT::BrokerId::Mqtt3: return prefs.mqtt3();
+  }
+  return prefs.mqtt1();
+}
+
 }  // namespace
 
 MOCli::MOCli(MOConfig& config, MOWifi& wifi, MOMQTT& mqtt,
@@ -41,7 +60,9 @@ bool MOCli::handleCommand(uint32_t senderTimestamp, const char* command,
 
   if (startsWith(input, "set mqtt1.") || startsWith(input, "get mqtt1.") ||
       input == "restart.mqtt1" || startsWith(input, "set mqtt2.") ||
-      startsWith(input, "get mqtt2.") || input == "restart.mqtt2") {
+      startsWith(input, "get mqtt2.") || input == "restart.mqtt2" ||
+      startsWith(input, "set mqtt3.") || startsWith(input, "get mqtt3.") ||
+      input == "restart.mqtt3") {
     return handleMqtt(input, reply);
   }
 
@@ -206,19 +227,26 @@ bool MOCli::handleMqtt(std::string_view command, char* reply) noexcept {
   if (command == "restart.mqtt2") {
     return restartMqtt(MOMQTT::BrokerId::Mqtt2, reply);
   }
+  if (command == "restart.mqtt3") {
+    return restartMqtt(MOMQTT::BrokerId::Mqtt3, reply);
+  }
 
   const bool mqtt1 = startsWith(command, "set mqtt1.") ||
                      startsWith(command, "get mqtt1.");
-  const MOMQTT::BrokerId broker =
-      mqtt1 ? MOMQTT::BrokerId::Mqtt1 : MOMQTT::BrokerId::Mqtt2;
+  const bool mqtt2 = startsWith(command, "set mqtt2.") ||
+                     startsWith(command, "get mqtt2.");
+  const bool mqtt3 = startsWith(command, "set mqtt3.") ||
+                     startsWith(command, "get mqtt3.");
+  if (!mqtt1 && !mqtt2 && !mqtt3) return false;
+  const MOMQTT::BrokerId broker = mqtt1 ? MOMQTT::BrokerId::Mqtt1
+      : mqtt2 ? MOMQTT::BrokerId::Mqtt2 : MOMQTT::BrokerId::Mqtt3;
+  const std::string_view prefix = mqtt1 ? "mqtt1."
+      : mqtt2 ? "mqtt2." : "mqtt3.";
 
-  const std::string_view prefix = mqtt1 ? "mqtt1." : "mqtt2.";
-
-  if (command == "get mqtt1.status" || command == "get mqtt2.status") {
+  if (command == "get mqtt1.status" || command == "get mqtt2.status" ||
+      command == "get mqtt3.status") {
     const auto runtimeStatus = mqtt_.status(broker);
-    const auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                            ? config_.mqtt().mqtt1()
-                            : config_.mqtt().mqtt2();
+    const auto& prefs = brokerPrefs(config_.mqtt(), broker);
 
     char buffer[kReplyCapacity];
     const char* configured =
@@ -323,9 +351,7 @@ bool MOCli::setWifiPassword(std::string_view value, char* reply) noexcept {
 
 bool MOCli::setMqttState(MOMQTT::BrokerId broker, MOOnOff state,
                          char* reply) noexcept {
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
 
   prefs.state = state;
   if (!config_.mqtt().save()) {
@@ -347,9 +373,7 @@ bool MOCli::setMqttHost(MOMQTT::BrokerId broker, std::string_view value,
     return copyReply(reply, "ERR");
   }
 
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
   prefs.host.assign(value.data(), value.size());
 
   if (!config_.mqtt().save()) {
@@ -367,9 +391,7 @@ bool MOCli::setMqttPort(MOMQTT::BrokerId broker, std::string_view value,
     return copyReply(reply, "ERR");
   }
 
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
   prefs.port = port;
 
   if (!config_.mqtt().save()) {
@@ -387,13 +409,13 @@ bool MOCli::setMqttTransport(MOMQTT::BrokerId broker, std::string_view value,
     transport = MOTransport::Tcp;
   } else if (value == "wss") {
     transport = MOTransport::Wss;
+  } else if (value == "mqtts") {
+    transport = MOTransport::Mqtts;
   } else {
     return copyReply(reply, "ERR");
   }
 
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
   prefs.transport = transport;
 
   if (!config_.mqtt().save()) {
@@ -410,9 +432,7 @@ bool MOCli::setMqttUsername(MOMQTT::BrokerId broker, std::string_view value,
     return copyReply(reply, "ERR");
   }
 
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
   prefs.username.assign(value.data(), value.size());
 
   if (!config_.mqtt().save()) {
@@ -429,9 +449,7 @@ bool MOCli::setMqttPassword(MOMQTT::BrokerId broker, std::string_view value,
     return copyReply(reply, "ERR");
   }
 
-  auto& prefs = broker == MOMQTT::BrokerId::Mqtt1
-                    ? config_.mqtt().mqtt1()
-                    : config_.mqtt().mqtt2();
+  auto& prefs = brokerPrefs(config_.mqtt(), broker);
   prefs.password.assign(value.data(), value.size());
 
   if (!config_.mqtt().save()) {

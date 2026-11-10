@@ -2,11 +2,11 @@
 
 MultiObserver is an open-source observer extension for **MeshCore Repeater**.
 It is designed as a reusable, application-level library that adds Wi-Fi and
-dual-broker MQTT observation to a MeshCore repeater without replacing or
+multi-broker MQTT observation to a MeshCore repeater without replacing or
 forking MeshCore core functionality.
 
 The observer receives repeater traffic, publishes packet and status telemetry
-to up to two independently configured MQTT brokers, and exposes persistent
+to up to three independently configured MQTT broker profiles, and exposes persistent
 network configuration through the standard MeshCore CLI. It supports secure
 MQTT-over-WebSocket connections (WSS/TLS), making it suitable for community or
 private telemetry backends.
@@ -33,8 +33,11 @@ adapter between the repeater application and the MultiObserver library.
 
 ## What MultiObserver provides
 
-- **Two independent MQTT broker profiles** with separate host, port,
+- **Three independent MQTT broker profiles** with separate host, port,
   transport, username, password and enable/disable settings.
+- **Heltec V3 limit:** three profiles can be saved and switched through the
+  CLI, but no more than **two TLS/WSS broker connections** should be enabled
+  simultaneously because of available RAM.
 - **Wi-Fi and MQTT configuration through the MeshCore CLI**, stored persistently
   on the device.
 - **MQTT over TCP or WSS/TLS**, with connection startup gated on usable Wi-Fi
@@ -56,16 +59,16 @@ MeshCore Repeater releases listed above.
 
 Implemented runtime mechanisms include:
 
-- persistent WiFi and dual-MQTT WSS/TLS configuration through the MeshCore CLI
+- persistent WiFi and three-profile MQTT configuration through the MeshCore CLI
 - explicit WiFi, SNTP and MQTT state machines with transition diagnostics
 - MQTT connection gating on both WiFi connectivity and sane system time
 - bounded reconnect backoff, heap headroom checks and ESP-TLS error reporting
-- packet, RAW and periodic status publication to both enabled brokers
+- packet, RAW and periodic status publication to every enabled broker
 - one-line RX/TX packet diagnostics in the serial monitor
 - EastMesh-style 60-second battery sampling cache for Heltec V3 GPIO37
 - non-blocking visible packet pulse on the Heltec V3 white GPIO35 LED
 - WiFi IP address on the Heltec OLED status screen
-- staged Wi-Fi, MQTT1 and MQTT2 supervision with one-shot reboot attribution
+- staged Wi-Fi and enabled MQTT-slot supervision with one-shot reboot attribution
 - 128-bit and 256-bit private MeshCore AlertChannel keys
 - private-channel Remote CLI without a duplicate parser or radio queue
 
